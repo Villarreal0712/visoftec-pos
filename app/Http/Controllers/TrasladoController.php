@@ -143,6 +143,8 @@ class TrasladoController extends Controller
                     'costo_unitario'      => $costoPromedio,
                     'id_usuario'          => auth()->id(),
                     'observacion'         => "Traslado {$traslado->numero_traslado} — salida hacia bodega ID {$idDestino}",
+                    'id_bodega'           => $idOrigen,
+                    'id_traslado'         => $traslado->id,
                 ]);
 
                 // Historial — entrada en destino (cantidad positiva)
@@ -154,6 +156,8 @@ class TrasladoController extends Controller
                     'costo_unitario'      => $costoPromedio,
                     'id_usuario'          => auth()->id(),
                     'observacion'         => "Traslado {$traslado->numero_traslado} — entrada desde bodega ID {$idOrigen}",
+                    'id_bodega'           => $idDestino,
+                    'id_traslado'         => $traslado->id,
                 ]);
 
                 DetalleTraslado::create([

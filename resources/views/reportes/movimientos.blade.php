@@ -5,7 +5,6 @@
 
 @section('content')
 @php
-    $tiposEntrada = ['Entrada', 'Ajuste'];
     $colores = [
         'Entrada'       => ['badge' => 'bg-emerald-100 text-emerald-700', 'icono' => '↑'],
         'Venta'         => ['badge' => 'bg-blue-100 text-blue-700',       'icono' => '🛒'],
@@ -38,6 +37,17 @@
                         @endforeach
                     </select>
                 </div>
+                <div class="form-group mb-0">
+                    <label class="form-label">Bodega</label>
+                    <select name="bodega" class="form-select w-auto">
+                        <option value="">Todas</option>
+                        @foreach($bodegas as $b)
+                        <option value="{{ $b->id }}" {{ (string) request('bodega') === (string) $b->id ? 'selected' : '' }}>
+                            {{ $b->nombre }}{{ $b->activo ? '' : ' (inactiva)' }}
+                        </option>
+                        @endforeach
+                    </select>
+                </div>
                 <button type="submit" class="btn-primary">Aplicar</button>
                 <a href="{{ route('reportes.movimientos') }}" class="btn-secondary">Hoy</a>
             </form>
@@ -63,6 +73,8 @@
                         <th class="text-center">Talla</th>
                         <th class="text-center">Tipo</th>
                         <th class="text-center">Cantidad</th>
+                        <th>Desde</th>
+                        <th>Hacia</th>
                         <th>Observación</th>
                         <th>Usuario</th>
                     </tr>
@@ -72,7 +84,9 @@
                     @php
                         $tipo   = $mov->tipo_operacion;
                         $config = $colores[$tipo] ?? ['badge' => 'bg-gray-100 text-gray-600', 'icono' => '·'];
-                        $esEntrada = in_array($tipo, $tiposEntrada);
+                        $direccion = $mov->direccion();
+                        $desde = $mov->desde();
+                        $hacia = $mov->hacia();
                     @endphp
                     <tr>
                         <td class="text-sm text-gray-600 whitespace-nowrap">{{ $mov->created_at->format('d/m/Y H:i') }}</td>
@@ -87,16 +101,24 @@
                             </span>
                         </td>
                         <td class="text-center font-bold tabular-nums">
-                            <span class="{{ $esEntrada ? 'text-emerald-600' : 'text-red-600' }}">
-                                {{ $esEntrada ? '+' : '−' }}{{ $mov->cantidad }}
-                            </span>
+                            @if($direccion === 'entra')
+                                <span class="text-emerald-600">+{{ abs($mov->cantidad) }}</span>
+                            @elseif($direccion === 'sale')
+                                <span class="text-red-600">−{{ abs($mov->cantidad) }}</span>
+                            @else
+                                <span class="text-gray-400">{{ abs($mov->cantidad) }}</span>
+                            @endif
                         </td>
-                        <td class="text-sm text-gray-500 max-w-xs truncate">{{ $mov->observacion ?? '—' }}</td>
+                        <td class="text-sm whitespace-nowrap {{ $direccion === 'sale' ? 'font-medium text-gray-800' : 'text-gray-500' }}">{{ $desde }}</td>
+                        <td class="text-sm whitespace-nowrap {{ $direccion === 'entra' ? 'font-medium text-gray-800' : 'text-gray-500' }}">
+                            <span class="text-gray-300">→</span> {{ $hacia }}
+                        </td>
+                        <td class="text-sm text-gray-500 max-w-xs truncate" title="{{ $mov->observacion }}">{{ $mov->observacion ?? '—' }}</td>
                         <td class="text-sm text-gray-600">{{ $mov->usuario?->nombre ?? '—' }}</td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="text-center py-8 text-gray-400">No hay movimientos en el período seleccionado</td>
+                        <td colspan="9" class="text-center py-8 text-gray-400">No hay movimientos en el período seleccionado</td>
                     </tr>
                     @endforelse
                 </tbody>

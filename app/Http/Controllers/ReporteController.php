@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Bodega;
 use App\Models\Cliente;
 use App\Models\GastoExterno;
 use App\Models\HistorialMovimiento;
@@ -133,9 +134,12 @@ class ReporteController extends Controller
         $fechaInicio = $request->get('fecha_inicio', today()->toDateString());
         $fechaFin = $request->get('fecha_fin', today()->toDateString());
 
-        $query = HistorialMovimiento::with(['detalleProducto.producto', 'usuario'])
+        $query = HistorialMovimiento::with(array_merge(['detalleProducto.producto', 'usuario'], HistorialMovimiento::RELACIONES_UBICACION))
                                     ->entreFechas($fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59')
                                     ->when($request->filled('tipo'), fn($q) => $q->where('tipo_operacion', $request->tipo))
+                                    // id_bodega es la bodega afectada: de la que sale o a la que entra (en un
+                                    // traslado, cada una de sus dos filas), así que basta este filtro.
+                                    ->when($request->filled('bodega'), fn($q) => $q->where('id_bodega', (int) $request->bodega))
                                     ->latest();
 
         if ($request->boolean('exportar')) {
@@ -145,7 +149,9 @@ class ReporteController extends Controller
                 'Producto'   => fn($m) => $m->detalleProducto?->producto?->nombre ?? '—',
                 'Talla'      => fn($m) => $m->detalleProducto?->talla ?? '—',
                 'Tipo'       => fn($m) => $m->tipo_operacion,
-                'Cantidad'   => fn($m) => $m->cantidad,
+                'Cantidad'   => fn($m) => match ($m->direccion()) { 'entra' => abs($m->cantidad), 'sale' => -abs($m->cantidad), default => 0 },
+                'Desde'      => fn($m) => $m->desde(),
+                'Hacia'      => fn($m) => $m->hacia(),
                 'Costo unit.'=> fn($m) => number_format($m->costo_unitario ?? 0, 2, '.', ''),
                 'Observación'=> fn($m) => $m->observacion ?? '—',
                 'Usuario'    => fn($m) => $m->usuario?->nombre ?? '—',
@@ -153,8 +159,9 @@ class ReporteController extends Controller
         }
 
         $movimientos = $query->paginate($this->getPerPage(50))->withQueryString();
+        $bodegas     = Bodega::orderBy('nombre')->get(['id', 'nombre', 'activo']);
 
-        return view('reportes.movimientos', compact('movimientos', 'fechaInicio', 'fechaFin'));
+        return view('reportes.movimientos', compact('movimientos', 'fechaInicio', 'fechaFin', 'bodegas'));
     }
 
     /**

@@ -349,6 +349,7 @@ class VentaController extends Controller
                         'costo_unitario'      => $costoDirecto,
                         'id_usuario'          => auth()->id(),
                         'observacion'         => "Venta directa #{$venta->id} (local externo #{$item['id_local_externo']})",
+                        'id_local_externo'    => $item['id_local_externo'],
                     ]);
 
                     continue;
@@ -387,6 +388,7 @@ class VentaController extends Controller
                         'costo_unitario'      => $lote->costo_unitario,
                         'id_usuario'          => auth()->id(),
                         'observacion'         => "Venta #{$venta->id}",
+                        'id_bodega'           => $lote->id_bodega,
                     ]);
 
                     $cantidadPendiente -= $cantidadADescontar;
@@ -474,8 +476,9 @@ class VentaController extends Controller
                 // Lotes directos (prestados): NO devolver inventario — la mercancía era ajena
                 if ($item->lote->tipo_origen === 'Directo') {
                     // Marcar el préstamo como anulado
-                    PrestamoExterno::where('id_historial_venta', $item->id)
-                        ->update(['estado' => PrestamoExterno::ESTADO_ANULADO]);
+                    $prestamo = PrestamoExterno::where('id_historial_venta', $item->id);
+                    $idLocalPrestamo = (clone $prestamo)->value('id_local_externo');
+                    $prestamo->update(['estado' => PrestamoExterno::ESTADO_ANULADO]);
 
                     HistorialMovimiento::create([
                         'id_detalle_producto' => $item->lote->id_detalle_producto,
@@ -485,6 +488,7 @@ class VentaController extends Controller
                         'costo_unitario' => $item->costo_unitario,
                         'id_usuario' => auth()->id(),
                         'observacion' => "Anulación venta directa #{$venta->id} — préstamo cancelado",
+                        'id_local_externo' => $idLocalPrestamo,
                     ]);
                     continue;
                 }
@@ -500,6 +504,7 @@ class VentaController extends Controller
                     'costo_unitario' => $item->costo_unitario,
                     'id_usuario' => auth()->id(),
                     'observacion' => "Anulación venta #{$venta->id}",
+                    'id_bodega' => $item->lote->id_bodega,
                 ]);
             }
 

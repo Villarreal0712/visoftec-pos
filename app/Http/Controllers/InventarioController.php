@@ -206,6 +206,7 @@ class InventarioController extends Controller
                     'id_local_externo'    => $request->id_local_externo,
                     'observacion'         => $request->observacion,
                     'id_entrada'          => $entrada->id,
+                    'id_bodega'           => $idBodega,
                 ]);
 
                 LoteInventario::create([
