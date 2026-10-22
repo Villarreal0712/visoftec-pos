@@ -96,19 +96,23 @@
                 </div>
 
                 {{-- Cambiar contraseña (opcional) --}}
-                <div class="border-t pt-4" x-data="{ cambiar: false }">
+                <div class="border-t pt-4" x-data="{ cambiar: @js($errors->has('password')) }">
                     <label class="flex items-center gap-2 cursor-pointer mb-3">
                         <input type="checkbox" x-model="cambiar" class="rounded border-gray-300 text-amber-500">
                         <span class="text-sm font-medium text-gray-700">Cambiar contraseña</span>
                     </label>
-                    <div x-show="cambiar" class="grid grid-cols-2 gap-4">
+                    {{-- :disabled → si se desmarca la casilla, los campos no se envían y la contraseña no cambia --}}
+                    <div x-show="cambiar" x-cloak class="grid grid-cols-2 gap-4">
                         <div class="form-group">
                             <label class="form-label">Nueva Contraseña</label>
-                            <input type="password" name="password" class="form-input" minlength="8" placeholder="Mín. 8 caracteres">
+                            <input type="password" name="password" class="form-input" minlength="8" placeholder="Mín. 8 caracteres"
+                                   :disabled="!cambiar" :required="cambiar">
+                            @error('password')<p class="form-error">{{ $message }}</p>@enderror
                         </div>
                         <div class="form-group">
                             <label class="form-label">Confirmar</label>
-                            <input type="password" name="password_confirmation" class="form-input" placeholder="Repetir">
+                            <input type="password" name="password_confirmation" class="form-input" placeholder="Repetir"
+                                   :disabled="!cambiar" :required="cambiar">
                         </div>
                     </div>
                 </div>

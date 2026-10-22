@@ -112,7 +112,13 @@ class UsuarioController extends Controller
             'activo'      => 'boolean',
             'id_sucursal' => 'nullable|exists:sucursales,id',
             'id_bodega'   => 'nullable|exists:bodegas,id',
+            // Opcional: el formulario de edición trae "Cambiar contraseña"
+            'password'    => ['nullable', Password::defaults(), 'confirmed'],
         ]);
+
+        if ($request->filled('password') && $usuario->hasRole('Administrador') && !auth()->user()->can('roles.gestionar')) {
+            return back()->withInput()->with('error', 'No tienes permiso para cambiar la contraseña de un Administrador.');
+        }
 
         if (!auth()->user()->can('roles.gestionar') && !$usuario->hasRole($validated['rol'])) {
             return back()->withInput()->with('error', 'No tienes permiso para cambiar el rol de este usuario.');
@@ -137,19 +143,27 @@ class UsuarioController extends Controller
             }
         }
 
-        $usuario->update([
+        $datos = [
             'nombre'      => $validated['nombre'],
             'usuario'     => $validated['usuario'],
             'email'       => $validated['email'] ?? null,
             'activo'      => $request->boolean('activo', true),
             'id_sucursal' => $validated['id_sucursal'] ?? $usuario->id_sucursal,
             'id_bodega'   => $validated['id_bodega'] ?? $usuario->id_bodega,
-        ]);
+        ];
+
+        if ($request->filled('password')) {
+            $datos['password'] = Hash::make($validated['password']);
+        }
+
+        $usuario->update($datos);
 
         $usuario->syncRoles([$validated['rol']]);
 
         return redirect()->route('usuarios.show', $usuario)
-                         ->with('success', 'Usuario actualizado correctamente.');
+                         ->with('success', $request->filled('password')
+                             ? 'Usuario y contraseña actualizados correctamente.'
+                             : 'Usuario actualizado correctamente.');
     }
 
     public function destroy(User $usuario)

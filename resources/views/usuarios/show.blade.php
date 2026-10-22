@@ -91,18 +91,19 @@
 
     {{-- Cambiar contraseña --}}
     @can('usuarios.editar')
-    <div class="card max-w-md" x-data="{ abierto: false }">
+    <div class="card max-w-md" x-data="{ abierto: @js($errors->has('password')) }">
         <div class="card-header cursor-pointer" @click="abierto = !abierto">
             <h3 class="card-title">Cambiar Contraseña</h3>
             <svg class="w-4 h-4 text-gray-400 transition-transform" :class="abierto && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
         </div>
-        <div x-show="abierto" class="card-body">
+        <div x-show="abierto" x-cloak class="card-body">
             <form method="POST" action="{{ route('usuarios.password', $usuario) }}" class="space-y-4">
                 @csrf @method('PUT')
                 <div class="grid grid-cols-2 gap-4">
                     <div class="form-group">
                         <label class="form-label">Nueva Contraseña</label>
                         <input type="password" name="password" class="form-input" minlength="8" required placeholder="Mín. 8 caracteres">
+                        @error('password')<p class="form-error">{{ $message }}</p>@enderror
                     </div>
                     <div class="form-group">
                         <label class="form-label">Confirmar</label>
