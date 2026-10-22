@@ -78,7 +78,9 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    // Fijo en español: el sistema es solo en español y así no depende de que cada
+    // servidor tenga APP_LOCALE bien puesto en su .env (el .env.example trae "en").
+    'locale' => 'es',
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 
