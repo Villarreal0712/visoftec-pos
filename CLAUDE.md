@@ -9,8 +9,8 @@ Sistema POS (Punto de Venta) para comercio minorista, desarrollado en Laravel 11
 ### Instalaciones
 | Sitio | Hosting | Acceso | Notas |
 |-------|---------|--------|-------|
-| `vigitecpost.com` | Hostinger | SSH `ssh hostinger` | **PRODUCCIÓN VIGITEC — no tocar.** Código distinto (otra rama) |
-| `santorini.vigitecpost.com` | Hostinger | SSH `ssh hostinger` | Ensayo/pruebas de VISOFTEC. PHP 8.4 (`/opt/alt/php84/usr/bin/php`) |
+| `vigitecpost.com` | Hostinger | SSH `ssh hostinger` | VIGITEC (código distinto) — **no tocar**. En modo mantenimiento desde 2026-10-15 21:45 (posible corte de la migración a santorini) |
+| `santorini.vigitecpost.com` | Hostinger | SSH `ssh hostinger` | **PRODUCCIÓN** de VISOFTEC — tratar con el mismo cuidado que jcfa. PHP 8.4 (`/opt/alt/php84/usr/bin/php`) |
 | `jcfa.visoftec.com` | Hosting Latinoamérica (cPanel) | **Solo SFTP** `sftp latam` (puerto 2200, sin shell) | **PRODUCCIÓN** tienda de calzado real. PHP 8.5 |
 
 Los alias `hostinger` y `latam` están en `~\.ssh\config` (misma llave `hostinger_ed25519`).
