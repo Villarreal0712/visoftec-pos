@@ -83,6 +83,9 @@
                         </div>
                         <input type="hidden" name="id_cuenta_bancaria" :value="idCuentaBancariaSeleccionada">
                         <input type="hidden" name="metodo_pago" :value="pagoSeleccionado === 'Mixto' ? 'Mixto' : ''">
+                        {{-- Reparto del pago mixto (se llenan en la barra inferior) --}}
+                        <input type="hidden" name="monto_efectivo" :value="pagoSeleccionado === 'Mixto' && !esCredito ? montoEfectivoMixto : ''">
+                        <input type="hidden" name="id_cuenta_mixto" :value="pagoSeleccionado === 'Mixto' && !esCredito ? idCuentaMixto : ''">
                     </div>
                     <span class="text-xs text-amber-600 font-medium" x-show="esCredito">(no aplica a crédito)</span>
 
@@ -422,6 +425,39 @@
                     </div>
                 </template>
 
+                {{-- Pago mixto: cuánto en efectivo y a qué cuenta entró el resto --}}
+                <template x-if="pagoSeleccionado === 'Mixto' && !esCredito">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <template x-if="cuentasBanco.length === 0">
+                            <span class="text-xs text-red-500 font-medium">⚠ Para pago mixto crea una cuenta bancaria (Nequi, banco…)</span>
+                        </template>
+                        <template x-if="cuentasBanco.length > 0">
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs text-gray-400">💵 Efectivo:</span>
+                                    <div class="relative">
+                                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                                        <input type="text" inputmode="numeric"
+                                            :value="fmtMiles(montoEfectivoMixto)"
+                                            @input="applyMiles($event, v => montoEfectivoMixto = v)"
+                                            class="w-32 pl-5 pr-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 text-money">
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs text-gray-400">+</span>
+                                    <select x-model="idCuentaMixto" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-300 bg-white">
+                                        <template x-for="c in cuentasBanco" :key="c.id">
+                                            <option :value="String(c.id)" x-text="c.nombre" :selected="String(c.id) === idCuentaMixto"></option>
+                                        </template>
+                                    </select>
+                                    <span class="font-bold text-blue-600 text-money">$<span x-text="montoTransferenciaMixto.toLocaleString('es-CO')"></span></span>
+                                </div>
+                                <span x-show="errorMixto && montoEfectivoMixto > 0" class="text-xs text-red-500" x-text="errorMixto"></span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
                 {{-- Aviso crédito sin cliente --}}
                 <template x-if="esCredito && !clienteId">
                     <span class="text-xs text-amber-600 font-medium">⚠ Selecciona un cliente para venta a crédito</span>
@@ -440,7 +476,7 @@
                 </a>
                 <button type="submit" form="form-venta"
                     @click.prevent="if(prepararFormulario()) document.getElementById('form-venta').submit()"
-                    :disabled="carrito.length === 0 || (esCredito && !clienteId) || carrito.some(i => i.esDirecto && !i.localExternoId)"
+                    :disabled="carrito.length === 0 || (esCredito && !clienteId) || carrito.some(i => i.esDirecto && !i.localExternoId) || !!errorMixto"
                     class="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold px-6 py-2 rounded-xl text-sm transition-colors flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>

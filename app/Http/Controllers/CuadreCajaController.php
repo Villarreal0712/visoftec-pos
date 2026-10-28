@@ -217,6 +217,13 @@ class CuadreCajaController extends Controller
             'gastos'                => (float) $cuadre->gastos,
             'liquidacionesExternas' => (float) ($cuadre->liquidaciones_externas ?? 0),
             'totalSistema'          => (float) $cuadre->total_sistema,
+            // El reparto efectivo/electrónico no se guarda al cerrar (solo se usa con la caja
+            // abierta); estos valores mantienen las mismas claves para las vistas.
+            'gastosEfectivo'          => (float) $cuadre->gastos,
+            'mixtoEfectivo'           => 0.0,
+            'mixtoElectronico'        => (float) ($cuadre->ventas_mixto ?? 0),
+            'pagosCreditoEfectivo'    => (float) $cuadre->pagos_credito,
+            'pagosCreditoElectronico' => 0.0,
         ];
     }
 
@@ -255,6 +262,27 @@ class CuadreCajaController extends Controller
             + $t['ventasEfectivo'] + $t['ventasTarjeta'] + $t['ventasTransferencia'] + $t['ventasMixto']
             + $t['pagosCredito'] - $gastosEfectivo - $t['liquidacionesExternas'];
 
+        // ── Reparto efectivo / electrónico (solo para la "Referencia del sistema" del cierre).
+        // No cambia totalSistema ni la diferencia: solo dice cuánto debería haber en el cajón y
+        // cuánto en transferencias.
+        $t['gastosEfectivo'] = $gastosEfectivo;
+        // Parte en efectivo de las ventas mixtas que guardan su reparto; las mixtas viejas (sin
+        // reparto) se siguen contando completas como electrónico, como antes.
+        $t['mixtoEfectivo'] = (float) Venta::activas()->entreFechas($inicio, $fin)
+            ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
+            ->where('metodo_pago', Venta::METODO_MIXTO)
+            ->where('es_credito', false)
+            ->whereNotNull('monto_transferencia')
+            ->sum('monto_efectivo');
+        $t['mixtoElectronico'] = $t['ventasMixto'] - $t['mixtoEfectivo'];
+        // Abonos en efectivo = sin cuenta (histórico) o a una cuenta tipo Efectivo
+        $t['pagosCreditoEfectivo'] = (float) PagoCredito::whereBetween('created_at', [$inicio, $fin])
+            ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
+            ->where(fn($q) => $q->whereNull('id_cuenta_bancaria')
+                ->orWhereHas('cuentaBancaria', fn($c) => $c->where('tipo', CuentaBancaria::TIPO_EFECTIVO)))
+            ->sum('monto');
+        $t['pagosCreditoElectronico'] = $t['pagosCredito'] - $t['pagosCreditoEfectivo'];
+
         return $t;
     }
 
@@ -269,7 +297,7 @@ class CuadreCajaController extends Controller
         $idSucursal = $cuadre->sucursalDelDetalle();
 
         return [
-            'ventas' => Venta::with(['cliente'])
+            'ventas' => Venta::with(['cliente', 'cuentaBancaria'])
                 ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
                 ->entreFechas($inicio, $fin)
                 ->latest()
@@ -368,7 +396,8 @@ class CuadreCajaController extends Controller
 
             return [
                 'nombre' => $cuenta->nombre,
-                'total'  => $grupoVentas->sum('total') + $grupoPagos->sum('monto') - $grupoGastos->sum('valor'),
+                // montoEnCuenta(): en una venta mixta solo cuenta la parte por transferencia
+                'total'  => $grupoVentas->sum(fn($v) => $v->montoEnCuenta()) + $grupoPagos->sum('monto') - $grupoGastos->sum('valor'),
             ];
         })->sortByDesc('total')->values();
     }

@@ -88,6 +88,18 @@ window.formatMoney = function(amount) {
     }).format(amount);
 };
 
+// ─── Pago mixto (efectivo + transferencia) — compartido por pos() y posMovil() ──
+// Devuelve el mensaje de error, o null si el reparto es válido. Misma regla que el
+// servidor (VentaController::store): las dos partes deben ser mayores que cero.
+window.errorPagoMixto = function(ctx) {
+    if (ctx.esCredito || ctx.pagoSeleccionado !== 'Mixto') return null;
+    if (ctx.cuentasBanco.length === 0) return 'Para pago mixto crea primero una cuenta bancaria (Nequi, banco…)';
+    if (!ctx.idCuentaMixto) return 'Selecciona la cuenta que recibió la transferencia';
+    if (!(ctx.montoEfectivoMixto > 0)) return 'Escribe cuánto se recibió en efectivo';
+    if (ctx.montoEfectivoMixto >= ctx.total) return 'El efectivo debe ser menor que el total; si todo fue en efectivo, elige Efectivo';
+    return null;
+};
+
 // ─── URL Base del sistema (funciona en subdirectorio XAMPP) ──────────────────
 
 function getBaseUrl() {
@@ -119,6 +131,13 @@ document.addEventListener('alpine:init', () => {
         diasCredito: 30,
         observaciones: '',
         efectivoPagado: 0,
+        // Pago mixto: parte en efectivo + cuenta Banco que recibió el resto
+        montoEfectivoMixto: 0,
+        idCuentaMixto: String((cuentas || []).find(c => c.tipo === 'Banco')?.id ?? ''),
+
+        get cuentasBanco() { return this.cuentas.filter(c => c.tipo === 'Banco'); },
+        get montoTransferenciaMixto() { return Math.max(0, this.total - this.montoEfectivoMixto); },
+        get errorMixto() { return window.errorPagoMixto(this); },
 
         // ── Modal nuevo cliente ──────────────────────────────
         modalCliente: false,
@@ -321,6 +340,10 @@ document.addEventListener('alpine:init', () => {
                 showToast(`Selecciona el local externo de "${sinLocal.producto}"`, 'warning');
                 return false;
             }
+            if (this.errorMixto) {
+                showToast(this.errorMixto, 'warning');
+                return false;
+            }
             // Aviso (no bloqueante) si hay préstamos sin costo — se puede cuadrar después
             const sinCosto = this.carrito.filter(i => i.esDirecto && !i.costoDirecto);
             if (sinCosto.length > 0) {
@@ -347,6 +370,13 @@ document.addEventListener('alpine:init', () => {
         diasCredito: 30,
         observaciones: '',
         efectivoPagado: 0,
+        // Pago mixto: parte en efectivo + cuenta Banco que recibió el resto
+        montoEfectivoMixto: 0,
+        idCuentaMixto: String((cuentas || []).find(c => c.tipo === 'Banco')?.id ?? ''),
+
+        get cuentasBanco() { return this.cuentas.filter(c => c.tipo === 'Banco'); },
+        get montoTransferenciaMixto() { return Math.max(0, this.total - this.montoEfectivoMixto); },
+        get errorMixto() { return window.errorPagoMixto(this); },
 
         // Scanner
         escaner: null,
@@ -537,6 +567,10 @@ document.addEventListener('alpine:init', () => {
             const sinLocal = this.carrito.find(i => i.esDirecto && !i.localExternoId);
             if (sinLocal) {
                 showToast(`Selecciona el local externo de "${sinLocal.producto}"`, 'warning');
+                return false;
+            }
+            if (this.errorMixto) {
+                showToast(this.errorMixto, 'warning');
                 return false;
             }
             const sinCosto = this.carrito.filter(i => i.esDirecto && !i.costoDirecto);

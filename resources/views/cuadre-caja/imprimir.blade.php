@@ -58,7 +58,7 @@
                     @foreach($ventas->where('es_credito', false) as $v)
                     <tr>
                         <td>{{ $v->cliente?->nombre ?? 'Directo' }}</td>
-                        <td>{{ $v->metodo_pago }}</td>
+                        <td>{{ $v->descripcionPago() }}</td>
                         <td class="text-right">${{ number_format($v->total, 0, ',', '.') }}</td>
                     </tr>
                     @endforeach
@@ -119,7 +119,10 @@
                 <div class="summary-row"><span>+ Ventas mixto:</span><span>${{ number_format($ventasMixto, 0, ',', '.') }}</span></div>
                 @endif
                 <div class="summary-row"><span>+ Cobros crédito:</span><span>${{ number_format($pagosCredito, 0, ',', '.') }}</span></div>
-                <div class="summary-row"><span>− Gastos:</span><span>-${{ number_format($gastos, 0, ',', '.') }}</span></div>
+                <div class="summary-row"><span>− Gastos en efectivo:</span><span>-${{ number_format($gastosEfectivo, 0, ',', '.') }}</span></div>
+                @if($gastos > $gastosEfectivo)
+                <div class="summary-row" style="font-size:10px;color:#6b7280;"><span>  (pagados desde cuenta bancaria: ${{ number_format($gastos - $gastosEfectivo, 0, ',', '.') }}, no afectan la caja)</span><span></span></div>
+                @endif
                 @if($liquidacionesExternas > 0)
                 <div class="summary-row"><span>− Pagos a externos:</span><span>-${{ number_format($liquidacionesExternas, 0, ',', '.') }}</span></div>
                 @endif

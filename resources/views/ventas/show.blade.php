@@ -24,7 +24,7 @@
                 <div class="flex justify-between"><span class="text-gray-500">Vendedor</span><span>{{ $venta->usuario->nombre }}</span></div>
                 <div class="flex justify-between"><span class="text-gray-500">Cliente</span><span>{{ $venta->cliente?->nombre ?? 'Venta directa' }}</span></div>
                 <div class="flex justify-between"><span class="text-gray-500">Método de pago</span>
-                    <span class="badge badge-info">{{ $venta->metodo_pago }}</span>
+                    <span class="badge badge-info">{{ $venta->descripcionPago() }}</span>
                 </div>
                 <div class="flex justify-between items-center border-t pt-3">
                     <span class="text-gray-500">Estado</span>

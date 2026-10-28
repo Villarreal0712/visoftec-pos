@@ -66,9 +66,16 @@
                 <div class="flex justify-between text-sm"><span class="text-gray-400">+ Ventas tarjeta/transf.</span><span class="text-blue-400 text-money">+${{ number_format($ventasTarjeta + $ventasTransferencia, 0, ',', '.') }}</span></div>
                 @if($ventasMixto > 0)
                 <div class="flex justify-between text-sm"><span class="text-gray-400">+ Ventas mixto</span><span class="text-purple-400 text-money">+${{ number_format($ventasMixto, 0, ',', '.') }}</span></div>
+                @if($mixtoEfectivo > 0)
+                <div class="flex justify-between text-xs pl-3"><span class="text-gray-500">en efectivo / por transferencia</span><span class="text-gray-400 text-money">${{ number_format($mixtoEfectivo, 0, ',', '.') }} / ${{ number_format($mixtoElectronico, 0, ',', '.') }}</span></div>
+                @endif
                 @endif
                 <div class="flex justify-between text-sm"><span class="text-gray-400">+ Cobros crédito</span><span class="text-amber-400 text-money">+${{ number_format($pagosCredito, 0, ',', '.') }}</span></div>
-                <div class="flex justify-between text-sm"><span class="text-gray-400">− Gastos</span><span class="text-red-400 text-money">-${{ number_format($gastos, 0, ',', '.') }}</span></div>
+                {{-- Solo los gastos en efectivo restan del total; los pagados desde una cuenta Banco no salen de la caja --}}
+                <div class="flex justify-between text-sm"><span class="text-gray-400">− Gastos en efectivo</span><span class="text-red-400 text-money">-${{ number_format($gastosEfectivo, 0, ',', '.') }}</span></div>
+                @if($gastos > $gastosEfectivo)
+                <div class="flex justify-between text-xs pl-3"><span class="text-gray-500">+ pagados desde cuenta bancaria (no afectan la caja)</span><span class="text-gray-400 text-money">${{ number_format($gastos - $gastosEfectivo, 0, ',', '.') }}</span></div>
+                @endif
                 @if($liquidacionesExternas > 0)
                 <div class="flex justify-between text-sm"><span class="text-gray-400">− Pagos a externos</span><span class="text-orange-400 text-money">-${{ number_format($liquidacionesExternas, 0, ',', '.') }}</span></div>
                 @endif
@@ -83,8 +90,12 @@
         @if($cuadreCaja->estado === 'Abierto')
         @can('caja.cerrar')
         @php
-            $efectivoEsperado    = $cuadreCaja->saldo_inicial + $ventasEfectivo + $pagosCredito - $gastos - $liquidacionesExternas;
-            $electronicoEsperado = $ventasTarjeta + $ventasTransferencia + $ventasMixto;
+            // Mismo total que totalSistema, repartido entre cajón y transferencias:
+            // - la parte en efectivo de las ventas mixtas va al cajón, el resto a transferencias;
+            // - los abonos y gastos van al lado por el que realmente entró/salió la plata.
+            $efectivoEsperado    = $cuadreCaja->saldo_inicial + $ventasEfectivo + $mixtoEfectivo
+                                 + $pagosCreditoEfectivo - $gastosEfectivo - $liquidacionesExternas;
+            $electronicoEsperado = $ventasTarjeta + $ventasTransferencia + $mixtoElectronico + $pagosCreditoElectronico;
         @endphp
         <div class="card">
             <div class="card-header"><h3 class="card-title">Cerrar Caja</h3></div>
@@ -209,7 +220,7 @@
             <div class="overflow-y-auto max-h-64">
                 @foreach($ventas->take(20) as $v)
                 <div class="flex justify-between px-4 py-2 border-b border-gray-50 text-sm">
-                    <span class="text-gray-600">{{ $v->cliente?->nombre ?? 'Directo' }} · {{ $v->metodo_pago }}</span>
+                    <span class="text-gray-600">{{ $v->cliente?->nombre ?? 'Directo' }} · {{ $v->descripcionPago() }}</span>
                     <span class="font-medium text-money">${{ number_format($v->total, 0, ',', '.') }}</span>
                 </div>
                 @endforeach

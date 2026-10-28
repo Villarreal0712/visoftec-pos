@@ -193,6 +193,9 @@ class VentaController extends Controller
             'items.*.id_local_externo'    => ['nullable', Rule::exists('locales_externos', 'id')->where('activo', true)],
             'metodo_pago'        => 'required_without:id_cuenta_bancaria|nullable|in:Efectivo,Tarjeta,Transferencia,Crédito,Mixto',
             'id_cuenta_bancaria' => ['nullable', Rule::exists('cuentas_bancarias', 'id')->where('activo', true)],
+            // Pago mixto: cuánto se recibió en efectivo y a qué cuenta (tipo Banco) entró el resto
+            'monto_efectivo'     => 'nullable|numeric|min:0|max:99999999',
+            'id_cuenta_mixto'    => ['nullable', Rule::exists('cuentas_bancarias', 'id')->where('activo', true)->where('tipo', CuentaBancaria::TIPO_BANCO)],
             'id_cliente'  => 'nullable|exists:clientes,id',
             'es_credito'  => 'boolean',
         ]);
@@ -257,6 +260,8 @@ class VentaController extends Controller
             // Una venta a crédito no mueve dinero real todavía, así que no se asocia a ninguna cuenta.
             $cuentaBancaria = null;
             $metodoPago = $request->metodo_pago ?: Venta::METODO_EFECTIVO;
+            $montoEfectivo = null;
+            $montoTransferencia = null;
 
             if ($esCredito) {
                 $metodoPago = Venta::METODO_CREDITO;
@@ -271,6 +276,20 @@ class VentaController extends Controller
                 if ($cliente->limite_credito > 0 && ($deudaActual + $total) > $cliente->limite_credito) {
                     throw new \Exception("\"{$cliente->nombre}\" superaría su límite de crédito. Límite: $" . number_format($cliente->limite_credito, 0, ',', '.') . ", deuda actual: $" . number_format($deudaActual, 0, ',', '.') . ".");
                 }
+            } elseif ($metodoPago === Venta::METODO_MIXTO) {
+                // Mixto = parte en efectivo (cuadra en el cajón) + resto por transferencia a una
+                // cuenta Banco (sube su saldo). Las dos partes deben ser mayores que cero; si no,
+                // no es mixto y debe registrarse con un solo método.
+                if (!$request->filled('id_cuenta_mixto')) {
+                    throw new \Exception('En un pago mixto selecciona la cuenta que recibió la transferencia.');
+                }
+                $montoEfectivo = round((float) $request->monto_efectivo, 2);
+                if ($montoEfectivo <= 0 || $montoEfectivo >= $total) {
+                    throw new \Exception('En un pago mixto el efectivo debe ser mayor que $0 y menor que el total ($'
+                        . number_format($total, 0, ',', '.') . '). Si todo fue en un solo medio, elige ese medio.');
+                }
+                $montoTransferencia = round($total - $montoEfectivo, 2);
+                $cuentaBancaria = CuentaBancaria::lockForUpdate()->findOrFail($request->id_cuenta_mixto);
             } elseif ($request->filled('id_cuenta_bancaria')) {
                 $cuentaBancaria = CuentaBancaria::lockForUpdate()->findOrFail($request->id_cuenta_bancaria);
                 $metodoPago = $cuentaBancaria->tipo === CuentaBancaria::TIPO_EFECTIVO
@@ -286,6 +305,8 @@ class VentaController extends Controller
                 'es_credito'       => $esCredito,
                 'metodo_pago'      => $metodoPago,
                 'id_cuenta_bancaria' => $cuentaBancaria?->id,
+                'monto_efectivo'     => $montoEfectivo,
+                'monto_transferencia'=> $montoTransferencia,
                 'fecha_vencimiento'=> $esCredito ? now()->addDays((int) $request->dias_credito) : null,
                 'saldo_pendiente'  => $esCredito ? $total : 0,
                 'estado_credito'   => $esCredito ? Venta::ESTADO_PARCIAL : Venta::ESTADO_PAGADO,
@@ -297,10 +318,12 @@ class VentaController extends Controller
             // que sigue siendo controlado por el Cuadre de Caja).
             if ($cuentaBancaria && $cuentaBancaria->tipo !== CuentaBancaria::TIPO_EFECTIVO) {
                 $cuentaBancaria->registrarMovimiento(
-                    $total,
+                    $venta->montoEnCuenta(),
                     MovimientoCuentaBancaria::TIPO_VENTA,
                     $venta->id,
-                    "Venta #{$venta->id}"
+                    $venta->esMixtoConReparto()
+                        ? "Venta #{$venta->id} (pago mixto: parte por transferencia)"
+                        : "Venta #{$venta->id}"
                 );
             }
 
@@ -524,8 +547,9 @@ class VentaController extends Controller
             if ($venta->id_cuenta_bancaria) {
                 $cuentaBancaria = CuentaBancaria::lockForUpdate()->find($venta->id_cuenta_bancaria);
                 if ($cuentaBancaria && $cuentaBancaria->tipo !== CuentaBancaria::TIPO_EFECTIVO) {
+                    // En una mixta solo se revierte lo que entró a la cuenta, no el total
                     $cuentaBancaria->registrarMovimiento(
-                        $venta->total,
+                        $venta->montoEnCuenta(),
                         MovimientoCuentaBancaria::TIPO_RETIRO,
                         $venta->id,
                         "Anulación venta #{$venta->id}"

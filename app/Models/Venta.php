@@ -20,6 +20,8 @@ class Venta extends Model
         'es_credito',
         'metodo_pago',
         'id_cuenta_bancaria',
+        'monto_efectivo',
+        'monto_transferencia',
         'fecha_vencimiento',
         'saldo_pendiente',
         'estado_credito',
@@ -36,6 +38,8 @@ class Venta extends Model
         'anulada' => 'boolean',
         'saldo_pendiente' => 'decimal:2',
         'total' => 'decimal:2',
+        'monto_efectivo' => 'decimal:2',
+        'monto_transferencia' => 'decimal:2',
     ];
 
     // Estados de crédito
@@ -48,6 +52,34 @@ class Venta extends Model
     const METODO_TARJETA = 'Tarjeta';
     const METODO_TRANSFERENCIA = 'Transferencia';
     const METODO_CREDITO = 'Crédito';
+    const METODO_MIXTO = 'Mixto';
+
+    /** Venta mixta con el reparto guardado (las mixtas anteriores al 2026-10-28 no lo tienen). */
+    public function esMixtoConReparto(): bool
+    {
+        return $this->metodo_pago === self::METODO_MIXTO && $this->monto_transferencia !== null;
+    }
+
+    /**
+     * Cuánto de esta venta entró a su cuenta bancaria (id_cuenta_bancaria): en una mixta,
+     * solo la parte por transferencia; en el resto, el total. Usar siempre esto —y no
+     * $total— al mover o revertir el saldo de la cuenta y al desglosar por cuenta.
+     */
+    public function montoEnCuenta(): float
+    {
+        return $this->esMixtoConReparto() ? (float) $this->monto_transferencia : (float) $this->total;
+    }
+
+    /** Texto del medio de pago; en una mixta incluye el reparto. */
+    public function descripcionPago(): string
+    {
+        if (!$this->esMixtoConReparto()) {
+            return (string) $this->metodo_pago;
+        }
+        $f = fn($v) => '$' . number_format((float) $v, 0, ',', '.');
+        $cuenta = $this->cuentaBancaria?->nombre ?? 'transferencia';
+        return "Mixto: efectivo {$f($this->monto_efectivo)} + {$cuenta} {$f($this->monto_transferencia)}";
+    }
 
     public function usuario(): BelongsTo
     {

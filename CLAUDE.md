@@ -79,6 +79,12 @@ En `agregarProducto()` y `buscarProducto()` de Alpine.js: si `stock === 0`, bloq
 - `cuadres_caja.todas_sucursales = 1` → cuadre de antes de manejar sucursales; su detalle incluye todas.
 - Solo los gastos pagados en efectivo restan del efectivo esperado.
 
+### Pago mixto (efectivo + transferencia) — desde 2026-10-28
+- En el POS, "Mixto" pide el **monto en efectivo** y la **cuenta Banco** que recibió el resto. La venta guarda `monto_efectivo`, `monto_transferencia` e `id_cuenta_bancaria` (= cuenta de la transferencia). Las dos partes deben ser > 0 (validado en JS `errorPagoMixto()` y en `VentaController::store`).
+- **Siempre usar `$venta->montoEnCuenta()`** (no `$venta->total`) para mover/revertir el saldo de la cuenta o desglosar por cuenta: en una mixta solo entra la parte por transferencia.
+- Mixtas anteriores al cambio no tienen reparto (`monto_transferencia` NULL): se siguen contando completas como transferencia.
+- Cuadre: `totalSistema` no cambió; la "Referencia del sistema" reparte cajón/transferencias con `mixtoEfectivo`, `pagosCreditoEfectivo` y `gastosEfectivo`.
+
 ### Salida de inventario (`/inventario/salida` y `/pos-movil/salida`)
 Tipo carrito: varios productos, se elige bodega, motivo obligatorio. Descuenta FIFO solo de esa bodega con `lockForUpdate()`. Tipos: Salida, Merma, Ajuste, Transferencia (a local externo).
 
@@ -162,6 +168,11 @@ npm run build
 
 # Tinker
 & "C:\xampp\php\php.exe" artisan tinker
+
+# Tests (necesitan MySQL de XAMPP corriendo; la base visoftec_test se BORRA en cada corrida)
+& "C:\xampp\mysql\bin\mysql.exe" -u root -e "CREATE DATABASE IF NOT EXISTS visoftec_test"
+$env:DB_CONNECTION='mysql'; $env:DB_DATABASE='visoftec_test'; $env:DB_USERNAME='root'; $env:DB_PASSWORD=''
+& "C:\xampp\php\php.exe" vendor/bin/phpunit
 
 # Limpiar caché
 & "C:\xampp\php\php.exe" artisan cache:clear

@@ -103,6 +103,38 @@
                 <span class="text-xs text-amber-600 font-medium" x-show="esCredito">(no aplica a crédito)</span>
                 <input type="hidden" name="id_cuenta_bancaria" :value="idCuentaBancariaSeleccionada">
                 <input type="hidden" name="metodo_pago" :value="pagoSeleccionado === 'Mixto' ? 'Mixto' : ''">
+                <input type="hidden" name="monto_efectivo" :value="pagoSeleccionado === 'Mixto' && !esCredito ? montoEfectivoMixto : ''">
+                <input type="hidden" name="id_cuenta_mixto" :value="pagoSeleccionado === 'Mixto' && !esCredito ? idCuentaMixto : ''">
+            </div>
+
+            {{-- Pago mixto: cuánto en efectivo y a qué cuenta entró el resto --}}
+            <div x-show="pagoSeleccionado === 'Mixto' && !esCredito" x-cloak class="ml-16 space-y-2 bg-blue-50 border border-blue-100 rounded-xl p-2.5">
+                <template x-if="cuentasBanco.length === 0">
+                    <p class="text-xs text-red-500 font-medium">⚠ Para pago mixto crea una cuenta bancaria (Nequi, banco…)</p>
+                </template>
+                <template x-if="cuentasBanco.length > 0">
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-600 w-20">💵 Efectivo</span>
+                            <div class="relative flex-1">
+                                <span class="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                                <input type="text" inputmode="numeric"
+                                    :value="fmtMiles(montoEfectivoMixto)"
+                                    @input="applyMiles($event, v => montoEfectivoMixto = v)"
+                                    class="w-full pl-5 pr-2 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-300 text-money bg-white">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <select x-model="idCuentaMixto" class="w-20 text-xs border border-gray-200 rounded-lg px-1 py-1.5 bg-white">
+                                <template x-for="c in cuentasBanco" :key="c.id">
+                                    <option :value="String(c.id)" x-text="c.nombre" :selected="String(c.id) === idCuentaMixto"></option>
+                                </template>
+                            </select>
+                            <span class="flex-1 text-right font-bold text-blue-700 text-money">$<span x-text="montoTransferenciaMixto.toLocaleString('es-CO')"></span></span>
+                        </div>
+                        <p x-show="errorMixto && montoEfectivoMixto > 0" class="text-xs text-red-500" x-text="errorMixto"></p>
+                    </div>
+                </template>
             </div>
 
             {{-- Crédito --}}
@@ -362,7 +394,7 @@
                 </div>
                 <button type="submit" form="form-movil"
                     @click.prevent="if(prepararFormulario()) document.getElementById('form-movil').submit()"
-                    :disabled="carrito.length === 0 || (esCredito && !clienteId) || carrito.some(i => i.esDirecto && !i.localExternoId)"
+                    :disabled="carrito.length === 0 || (esCredito && !clienteId) || carrito.some(i => i.esDirecto && !i.localExternoId) || !!errorMixto"
                     class="flex-shrink-0 px-6 py-4 rounded-2xl font-bold text-base text-white shadow-lg transition-colors active:scale-95
                         bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100
                         flex items-center gap-2">

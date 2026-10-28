@@ -128,6 +128,10 @@
 @endif
 @endif
 <div class="row"><span class="label">Método pago</span><span>{{ $venta->metodo_pago }}</span></div>
+@if($venta->esMixtoConReparto())
+<div class="row"><span class="label">  Efectivo</span><span>${{ number_format($venta->monto_efectivo, 0, ',', '.') }}</span></div>
+<div class="row"><span class="label">  {{ $venta->cuentaBancaria?->nombre ?? 'Transferencia' }}</span><span>${{ number_format($venta->monto_transferencia, 0, ',', '.') }}</span></div>
+@endif
 @if($venta->es_credito && $venta->fecha_vencimiento)
 <div class="row"><span class="label">Vence crédito</span><span class="bold">{{ $venta->fecha_vencimiento->format('d/m/Y') }}</span></div>
 @endif
