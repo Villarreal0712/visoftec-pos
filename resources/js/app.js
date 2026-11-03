@@ -92,11 +92,11 @@ window.formatMoney = function(amount) {
 // Devuelve el mensaje de error, o null si el reparto es válido. Misma regla que el
 // servidor (VentaController::store): las dos partes deben ser mayores que cero.
 window.errorPagoMixto = function(ctx) {
-    if (ctx.esCredito || ctx.pagoSeleccionado !== 'Mixto') return null;
+    if (ctx.esCredito || ctx.pagoSeleccionado !== 'Mixto' || ctx.aPagar <= 0) return null;
     if (ctx.cuentasBanco.length === 0) return 'Para pago mixto crea primero una cuenta bancaria (Nequi, banco…)';
     if (!ctx.idCuentaMixto) return 'Selecciona la cuenta que recibió la transferencia';
     if (!(ctx.montoEfectivoMixto > 0)) return 'Escribe cuánto se recibió en efectivo';
-    if (ctx.montoEfectivoMixto >= ctx.total) return 'El efectivo debe ser menor que el total; si todo fue en efectivo, elige Efectivo';
+    if (ctx.montoEfectivoMixto >= ctx.aPagar) return 'El efectivo debe ser menor que el total; si todo fue en efectivo, elige Efectivo';
     return null;
 };
 
@@ -112,7 +112,7 @@ function getBaseUrl() {
 document.addEventListener('alpine:init', () => {
 
     // POS - Punto de Venta
-    Alpine.data('pos', (buscarUrl, urlClienteRapido, localesExternos, puedeVenderPrestamo, cuentas) => ({
+    Alpine.data('pos', (buscarUrl, urlClienteRapido, localesExternos, puedeVenderPrestamo, cuentas, saldosFavor) => ({
         // Si Blade pasa la URL úsala, si no, constrúyela desde el meta tag
         buscarUrl: buscarUrl || (getBaseUrl() + '/api/productos/buscar'),
         urlClienteRapido: urlClienteRapido || '',
@@ -136,8 +136,20 @@ document.addEventListener('alpine:init', () => {
         idCuentaMixto: String((cuentas || []).find(c => c.tipo === 'Banco')?.id ?? ''),
 
         get cuentasBanco() { return this.cuentas.filter(c => c.tipo === 'Banco'); },
-        get montoTransferenciaMixto() { return Math.max(0, this.total - this.montoEfectivoMixto); },
+        get montoTransferenciaMixto() { return Math.max(0, this.aPagar - this.montoEfectivoMixto); },
         get errorMixto() { return window.errorPagoMixto(this); },
+
+        // Saldo a favor del cliente elegido: cubre una parte (o todo) y el resto va por el medio de pago
+        saldosFavor: saldosFavor || {},
+        usarSaldo: false,
+        get saldoDisponible() { return this.esCredito ? 0 : (this.saldosFavor[this.clienteId] || 0); },
+        get montoSaldo() { return this.usarSaldo ? Math.min(this.saldoDisponible, this.total) : 0; },
+        get aPagar() { return this.total - this.montoSaldo; },
+
+        init() {
+            // Al cambiar de cliente no se arrastra la decisión de usar el saldo del anterior
+            this.$watch('clienteId', () => { this.usarSaldo = false; });
+        },
 
         // ── Modal nuevo cliente ──────────────────────────────
         modalCliente: false,
@@ -204,7 +216,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         get cambio() {
-            return Math.max(0, this.efectivoPagado - this.total);
+            return Math.max(0, this.efectivoPagado - this.aPagar);
         },
 
         get idCuentaBancariaSeleccionada() {
@@ -354,7 +366,7 @@ document.addEventListener('alpine:init', () => {
     }));
 
     // ─── POS Móvil ───────────────────────────────────────────────────────────────
-    Alpine.data('posMovil', (buscarUrl, urlClienteRapido, localesExternos, puedeVenderPrestamo, cuentas) => ({
+    Alpine.data('posMovil', (buscarUrl, urlClienteRapido, localesExternos, puedeVenderPrestamo, cuentas, saldosFavor) => ({
         buscarUrl: buscarUrl || (getBaseUrl() + '/api/productos/buscar'),
         urlClienteRapido: urlClienteRapido || '',
         localesExternos: localesExternos || [],
@@ -375,8 +387,20 @@ document.addEventListener('alpine:init', () => {
         idCuentaMixto: String((cuentas || []).find(c => c.tipo === 'Banco')?.id ?? ''),
 
         get cuentasBanco() { return this.cuentas.filter(c => c.tipo === 'Banco'); },
-        get montoTransferenciaMixto() { return Math.max(0, this.total - this.montoEfectivoMixto); },
+        get montoTransferenciaMixto() { return Math.max(0, this.aPagar - this.montoEfectivoMixto); },
         get errorMixto() { return window.errorPagoMixto(this); },
+
+        // Saldo a favor del cliente elegido: cubre una parte (o todo) y el resto va por el medio de pago
+        saldosFavor: saldosFavor || {},
+        usarSaldo: false,
+        get saldoDisponible() { return this.esCredito ? 0 : (this.saldosFavor[this.clienteId] || 0); },
+        get montoSaldo() { return this.usarSaldo ? Math.min(this.saldoDisponible, this.total) : 0; },
+        get aPagar() { return this.total - this.montoSaldo; },
+
+        init() {
+            // Al cambiar de cliente no se arrastra la decisión de usar el saldo del anterior
+            this.$watch('clienteId', () => { this.usarSaldo = false; });
+        },
 
         // Scanner
         escaner: null,
@@ -397,7 +421,7 @@ document.addEventListener('alpine:init', () => {
             return this.carrito.reduce((sum, i) => sum + i.cantidad * i.precio, 0);
         },
         get cambio() {
-            return Math.max(0, this.efectivoPagado - this.total);
+            return Math.max(0, this.efectivoPagado - this.aPagar);
         },
 
         get idCuentaBancariaSeleccionada() {

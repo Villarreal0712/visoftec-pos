@@ -126,9 +126,12 @@
 
 {{-- Resumen --}}
 <div class="resumen">
-    <div class="resumen-row"><span>Total compras histórico:</span><span>${{ number_format($cliente->ventas->sum('total'), 0, ',', '.') }}</span></div>
+    <div class="resumen-row"><span>Total compras histórico:</span><span>${{ number_format($cliente->ventas->where('anulada', false)->sum(fn($v) => $v->totalNeto()), 0, ',', '.') }}</span></div>
     <div class="resumen-row"><span>Total abonado:</span><span>${{ number_format($todosAbonos->sum('monto'), 0, ',', '.') }}</span></div>
     <div class="resumen-row big"><span>SALDO PENDIENTE:</span><span>${{ number_format($saldoPendiente, 0, ',', '.') }}</span></div>
+    @if($cliente->saldo_favor > 0)
+    <div class="resumen-row"><span>Saldo a favor del cliente:</span><span>${{ number_format($cliente->saldo_favor, 0, ',', '.') }}</span></div>
+    @endif
 </div>
 
 <div class="footer">

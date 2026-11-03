@@ -4,7 +4,7 @@
 @section('page-title', 'Punto de Venta')
 
 @section('content')
-<div x-data="pos('{{ route('productos.buscar-pos') }}', '{{ route('clientes.rapido') }}', {{ $localesExternos->map(fn($l) => ['id' => $l->id, 'nombre' => $l->nombre_local])->values()->toJson() }}, {{ $puedeVenderPrestamo ? 'true' : 'false' }}, {{ $cuentas->map(fn($c) => ['id' => $c->id, 'nombre' => $c->nombre, 'tipo' => $c->tipo])->values()->toJson() }})" class="space-y-4 pb-24">
+<div x-data="pos('{{ route('productos.buscar-pos') }}', '{{ route('clientes.rapido') }}', {{ $localesExternos->map(fn($l) => ['id' => $l->id, 'nombre' => $l->nombre_local])->values()->toJson() }}, {{ $puedeVenderPrestamo ? 'true' : 'false' }}, {{ $cuentas->map(fn($c) => ['id' => $c->id, 'nombre' => $c->nombre, 'tipo' => $c->tipo])->values()->toJson() }}, @js((object) $saldosFavor->all()))" class="space-y-4 pb-24">
 
     @if(!$cajaAbierta)
     <div class="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
@@ -86,6 +86,7 @@
                         {{-- Reparto del pago mixto (se llenan en la barra inferior) --}}
                         <input type="hidden" name="monto_efectivo" :value="pagoSeleccionado === 'Mixto' && !esCredito ? montoEfectivoMixto : ''">
                         <input type="hidden" name="id_cuenta_mixto" :value="pagoSeleccionado === 'Mixto' && !esCredito ? idCuentaMixto : ''">
+                        <input type="hidden" name="monto_saldo_favor" :value="montoSaldo > 0 ? montoSaldo : ''">
                     </div>
                     <span class="text-xs text-amber-600 font-medium" x-show="esCredito">(no aplica a crédito)</span>
 
@@ -406,7 +407,21 @@
                 </div>
 
                 {{-- Efectivo recibido y cambio --}}
-                <template x-if="esEfectivoSeleccionado && !esCredito">
+                {{-- Saldo a favor del cliente --}}
+                <template x-if="saldoDisponible > 0">
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" x-model="usarSaldo" class="rounded border-gray-300 text-emerald-600">
+                        <span class="text-xs text-emerald-700 font-medium">Usar saldo a favor ($<span x-text="saldoDisponible.toLocaleString('es-CO')"></span>)</span>
+                    </label>
+                </template>
+                <template x-if="montoSaldo > 0">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xs text-gray-400">A pagar:</span>
+                        <span class="font-extrabold text-emerald-700 text-money">$<span x-text="aPagar.toLocaleString('es-CO')"></span></span>
+                    </div>
+                </template>
+
+                <template x-if="esEfectivoSeleccionado && !esCredito && aPagar > 0">
                     <div class="flex items-center gap-3">
                         <div class="flex items-center gap-1.5">
                             <span class="text-xs text-gray-400">Recibido:</span>
@@ -418,7 +433,7 @@
                                     class="w-32 pl-5 pr-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 text-money">
                             </div>
                         </div>
-                        <div x-show="efectivoPagado >= total && total > 0" class="flex items-center gap-1.5">
+                        <div x-show="efectivoPagado >= aPagar && aPagar > 0" class="flex items-center gap-1.5">
                             <span class="text-xs text-gray-400">Cambio:</span>
                             <span class="font-bold text-emerald-600 text-money">$<span x-text="cambio.toLocaleString('es-CO')"></span></span>
                         </div>
@@ -426,7 +441,7 @@
                 </template>
 
                 {{-- Pago mixto: cuánto en efectivo y a qué cuenta entró el resto --}}
-                <template x-if="pagoSeleccionado === 'Mixto' && !esCredito">
+                <template x-if="pagoSeleccionado === 'Mixto' && !esCredito && aPagar > 0">
                     <div class="flex items-center gap-3 flex-wrap">
                         <template x-if="cuentasBanco.length === 0">
                             <span class="text-xs text-red-500 font-medium">⚠ Para pago mixto crea una cuenta bancaria (Nequi, banco…)</span>

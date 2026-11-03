@@ -33,7 +33,7 @@
                 <input type="text" name="cliente" value="{{ request('cliente') }}" class="form-input min-w-40" placeholder="Buscar cliente...">
                 <select name="metodo_pago" class="form-select w-auto">
                     <option value="">Todos los métodos</option>
-                    @foreach(['Efectivo','Tarjeta','Transferencia','Crédito','Mixto'] as $m)
+                    @foreach(['Efectivo','Tarjeta','Transferencia','Crédito','Mixto','Saldo a favor'] as $m)
                     <option value="{{ $m }}" {{ request('metodo_pago') === $m ? 'selected' : '' }}>{{ $m }}</option>
                     @endforeach
                 </select>
@@ -89,7 +89,10 @@
                                 {{ $venta->metodo_pago }}
                             </span>
                         </td>
-                        <td class="text-right font-bold text-money">${{ number_format($venta->total, 0, ',', '.') }}</td>
+                        <td class="text-right font-bold text-money">
+                            ${{ number_format($venta->total, 0, ',', '.') }}
+                            @if($venta->total_devuelto > 0)<p class="text-xs font-normal text-amber-600">devuelto -${{ number_format($venta->total_devuelto, 0, ',', '.') }}</p>@endif
+                        </td>
                         <td class="text-center">
                             @if($venta->anulada)
                                 <span class="badge badge-danger">Anulada</span>

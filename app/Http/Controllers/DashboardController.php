@@ -20,7 +20,7 @@ class DashboardController extends Controller
 
         // Estadísticas del día
         $ventasHoy = Venta::deHoy()->count();
-        $ingresoHoy = Venta::deHoy()->sum('total');
+        $ingresoHoy = Venta::deHoy()->sum(DB::raw('total - total_devuelto'));
         $gastosHoy = GastoExterno::deHoy()->sum('valor');
         $gananciaHoy = $this->calcularGananciaHoy();
 
@@ -42,7 +42,7 @@ class DashboardController extends Controller
 
         // Gráfico: ventas de los últimos 7 días
         $ventasSemana = DB::table('ventas')
-            ->selectRaw('DATE(created_at) as fecha, COUNT(*) as cantidad, SUM(total) as total')
+            ->selectRaw('DATE(created_at) as fecha, COUNT(*) as cantidad, SUM(total - total_devuelto) as total')
             ->where('anulada', false)
             ->where('created_at', '>=', now()->subDays(7))
             ->groupBy('fecha')
@@ -57,8 +57,9 @@ class DashboardController extends Controller
             ->join('ventas as v', 'hv.id_venta', '=', 'v.id')
             ->where('v.created_at', '>=', now()->startOfMonth())
             ->where('v.anulada', false)
-            ->selectRaw('p.nombre, SUM(hv.cantidad) as total_vendido, SUM(hv.cantidad * hv.precio_venta) as ingresos')
+            ->selectRaw('p.nombre, SUM(hv.cantidad - hv.cantidad_devuelta) as total_vendido, SUM((hv.cantidad - hv.cantidad_devuelta) * hv.precio_venta) as ingresos')
             ->groupBy('p.id', 'p.nombre')
+            ->havingRaw('SUM(hv.cantidad - hv.cantidad_devuelta) > 0')   // los devueltos del todo no cuentan
             ->orderByDesc('total_vendido')
             ->limit(5)
             ->get();
@@ -69,8 +70,8 @@ class DashboardController extends Controller
             ->where('v.created_at', '>=', now()->subMonths(6))
             ->where('v.anulada', false)
             ->selectRaw('YEAR(v.created_at) as anio, MONTH(v.created_at) as mes,
-                         SUM(hv.cantidad * hv.precio_venta) as ventas,
-                         SUM(hv.cantidad * hv.costo_unitario) as costos')
+                         SUM((hv.cantidad - hv.cantidad_devuelta) * hv.precio_venta) as ventas,
+                         SUM((hv.cantidad - hv.cantidad_devuelta) * hv.costo_unitario) as costos')
             ->groupBy('anio', 'mes')
             ->orderBy('anio')->orderBy('mes')
             ->get()
@@ -105,7 +106,7 @@ class DashboardController extends Controller
             ->join('ventas as v', 'hv.id_venta', '=', 'v.id')
             ->whereDate('v.created_at', today())
             ->where('v.anulada', false)
-            ->selectRaw('SUM(hv.cantidad * (hv.precio_venta - hv.costo_unitario)) as ganancia')
+            ->selectRaw('SUM((hv.cantidad - hv.cantidad_devuelta) * (hv.precio_venta - hv.costo_unitario)) as ganancia')
             ->value('ganancia') ?? 0;
     }
 }

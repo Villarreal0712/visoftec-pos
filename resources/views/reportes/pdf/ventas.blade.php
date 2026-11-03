@@ -46,7 +46,7 @@
             <td>{{ $venta->cliente?->nombre ?? 'Venta directa' }}</td>
             <td>{{ $venta->usuario->nombre }}</td>
             <td>{{ $venta->metodo_pago }}</td>
-            <td class="text-right">${{ number_format($venta->total, 0, ',', '.') }}</td>
+            <td class="text-right">${{ number_format($venta->totalNeto(), 0, ',', '.') }}@if($venta->total_devuelto > 0)<br><small>(devuelto -${{ number_format($venta->total_devuelto, 0, ',', '.') }})</small>@endif</td>
             <td>{{ $venta->es_credito ? $venta->estado_credito : 'Pagado' }}</td>
         </tr>
         @endforeach

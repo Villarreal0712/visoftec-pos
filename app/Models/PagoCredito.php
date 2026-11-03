@@ -47,4 +47,10 @@ class PagoCredito extends Model
     {
         return $this->belongsTo(CuentaBancaria::class, 'id_cuenta_bancaria');
     }
+
+    /** Abonos en los que entró dinero (excluye los pagados con saldo a favor). */
+    public function scopeConDinero($query)
+    {
+        return $query->where('metodo', '!=', Venta::METODO_SALDO_FAVOR);
+    }
 }

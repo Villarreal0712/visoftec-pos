@@ -124,7 +124,9 @@ class HistorialMovimiento extends Model
         return match (true) {
             $this->tipo_operacion === self::TIPO_ENTRADA,
             $this->esAnulacionVenta() && $this->cantidad > 0 => $this->nombreBodega($this->bodega),
-            $this->esAnulacionVenta() => 'Local externo (préstamo cancelado)',
+            $this->esAnulacionVenta() => str_starts_with((string) $this->observacion, 'Devolución')
+                ? 'Local externo (devuelto por el cliente)'
+                : 'Local externo (préstamo cancelado)',
             $this->tipo_operacion === self::TIPO_VENTA => 'Cliente' . $this->numeroVenta(),
             $this->tipo_operacion === self::TIPO_TRANSFERENCIA && $this->localExterno
                 => 'Local externo: ' . $this->localExterno->nombre_local,
@@ -138,10 +140,12 @@ class HistorialMovimiento extends Model
         };
     }
 
+    /** Ajuste por una venta anulada o por una devolución de ítems (DevolucionController). */
     private function esAnulacionVenta(): bool
     {
         return $this->tipo_operacion === self::TIPO_AJUSTE
-            && str_starts_with((string) $this->observacion, 'Anulación venta');
+            && (str_starts_with((string) $this->observacion, 'Anulación venta')
+                || str_starts_with((string) $this->observacion, 'Devolución venta'));
     }
 
     private function numeroVenta(): string

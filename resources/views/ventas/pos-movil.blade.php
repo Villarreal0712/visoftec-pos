@@ -9,7 +9,8 @@
         '{{ route('clientes.rapido') }}',
         {{ $localesExternos->map(fn($l) => ['id' => $l->id, 'nombre' => $l->nombre_local])->values()->toJson() }},
         {{ $puedeVenderPrestamo ? 'true' : 'false' }},
-        {{ $cuentas->map(fn($c) => ['id' => $c->id, 'nombre' => $c->nombre, 'tipo' => $c->tipo])->values()->toJson() }}
+        {{ $cuentas->map(fn($c) => ['id' => $c->id, 'nombre' => $c->nombre, 'tipo' => $c->tipo])->values()->toJson() }},
+        @js((object) $saldosFavor->all())
     )"
     class="flex flex-col min-h-screen pb-40"
 >
@@ -105,10 +106,11 @@
                 <input type="hidden" name="metodo_pago" :value="pagoSeleccionado === 'Mixto' ? 'Mixto' : ''">
                 <input type="hidden" name="monto_efectivo" :value="pagoSeleccionado === 'Mixto' && !esCredito ? montoEfectivoMixto : ''">
                 <input type="hidden" name="id_cuenta_mixto" :value="pagoSeleccionado === 'Mixto' && !esCredito ? idCuentaMixto : ''">
+                <input type="hidden" name="monto_saldo_favor" :value="montoSaldo > 0 ? montoSaldo : ''">
             </div>
 
             {{-- Pago mixto: cuánto en efectivo y a qué cuenta entró el resto --}}
-            <div x-show="pagoSeleccionado === 'Mixto' && !esCredito" x-cloak class="ml-16 space-y-2 bg-blue-50 border border-blue-100 rounded-xl p-2.5">
+            <div x-show="pagoSeleccionado === 'Mixto' && !esCredito && aPagar > 0" x-cloak class="ml-16 space-y-2 bg-blue-50 border border-blue-100 rounded-xl p-2.5">
                 <template x-if="cuentasBanco.length === 0">
                     <p class="text-xs text-red-500 font-medium">⚠ Para pago mixto crea una cuenta bancaria (Nequi, banco…)</p>
                 </template>
@@ -358,8 +360,19 @@
     <div class="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-gray-200 shadow-2xl safe-area-bottom">
         <div class="px-3 py-2 space-y-2">
 
+            {{-- Saldo a favor del cliente --}}
+            <template x-if="saldoDisponible > 0 && carrito.length > 0">
+                <label class="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2 cursor-pointer">
+                    <span class="flex items-center gap-2">
+                        <input type="checkbox" x-model="usarSaldo" class="rounded border-gray-300 text-emerald-600">
+                        <span class="text-sm text-emerald-700 font-medium">Usar saldo a favor ($<span x-text="saldoDisponible.toLocaleString('es-CO')"></span>)</span>
+                    </span>
+                    <span x-show="montoSaldo > 0" class="text-xs text-emerald-700">A pagar: <b>$<span x-text="aPagar.toLocaleString('es-CO')"></span></b></span>
+                </label>
+            </template>
+
             {{-- Efectivo recibido --}}
-            <template x-if="esEfectivoSeleccionado && !esCredito && carrito.length > 0">
+            <template x-if="esEfectivoSeleccionado && !esCredito && carrito.length > 0 && aPagar > 0">
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-gray-500 flex-shrink-0">Recibido:</span>
                     <div class="relative flex-1">
@@ -369,7 +382,7 @@
                             @input="applyMiles($event, v => efectivoPagado = v)"
                             class="w-full pl-7 pr-3 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-300">
                     </div>
-                    <div x-show="efectivoPagado >= total && total > 0" class="flex items-center gap-1 flex-shrink-0">
+                    <div x-show="efectivoPagado >= aPagar && aPagar > 0" class="flex items-center gap-1 flex-shrink-0">
                         <span class="text-xs text-gray-500">Cambio:</span>
                         <span class="text-sm font-bold text-emerald-600">$<span x-text="cambio.toLocaleString('es-CO')"></span></span>
                     </div>

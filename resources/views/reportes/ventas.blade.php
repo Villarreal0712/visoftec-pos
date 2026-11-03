@@ -106,7 +106,10 @@
                         <td>{{ $venta->cliente?->nombre ?? 'Venta directa' }}</td>
                         <td>{{ $venta->usuario->nombre }}</td>
                         <td><span class="badge badge-info">{{ $venta->metodo_pago }}</span></td>
-                        <td class="text-right font-bold text-money">${{ number_format($venta->total, 0, ',', '.') }}</td>
+                        <td class="text-right font-bold text-money">
+                            ${{ number_format($venta->totalNeto(), 0, ',', '.') }}
+                            @if($venta->total_devuelto > 0)<p class="text-xs font-normal text-amber-600">devuelto -${{ number_format($venta->total_devuelto, 0, ',', '.') }}</p>@endif
+                        </td>
                         <td class="text-center">
                             @if(!$venta->es_credito || $venta->estado_credito === 'Pagado')
                                 <span class="badge badge-success">Pagado</span>

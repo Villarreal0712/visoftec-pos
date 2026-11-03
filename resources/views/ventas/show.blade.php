@@ -11,6 +11,14 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
             Ver Ticket
         </a>
+        @can('ventas.anular')
+        @if(!$venta->anulada && $venta->historialVentas->sum('cantidad_neta') > 0)
+        <button type="button" x-data @click="$dispatch('open-modal', 'modal-devolucion')" class="btn-secondary">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+            Devolver ítems
+        </button>
+        @endif
+        @endcan
         <a href="{{ route('ventas.index') }}" class="btn-secondary">← Volver</a>
     </div>
 
@@ -43,6 +51,9 @@
                 @if($venta->anulada)
                 <div class="flex justify-between"><span class="text-gray-500">Motivo anulación</span><span class="text-gray-600 italic">{{ $venta->motivo_anulacion ?? 'No especificado' }}</span></div>
                 @endif
+                @if($venta->total_devuelto > 0)
+                <div class="flex justify-between"><span class="text-gray-500">Devuelto</span><span class="font-bold text-amber-600 text-money">-${{ number_format($venta->total_devuelto, 0, ',', '.') }}</span></div>
+                @endif
                 @if($venta->es_credito && !$venta->anulada)
                 <div class="flex justify-between"><span class="text-gray-500">Vencimiento</span><span class="text-amber-600">{{ $venta->fecha_vencimiento?->format('d/m/Y') }}</span></div>
                 <div class="flex justify-between"><span class="text-gray-500">Saldo pendiente</span><span class="font-bold text-red-600 text-money">${{ number_format($venta->saldo_pendiente, 0, ',', '.') }}</span></div>
@@ -63,6 +74,7 @@
                                 ({{ $item->lote->detalleProducto->talla }})
                             @endif
                             × {{ $item->cantidad }}
+                            @if($item->cantidad_devuelta)<span class="text-amber-600 text-xs">({{ $item->cantidad_devuelta }} devuelto{{ $item->cantidad_devuelta > 1 ? 's' : '' }})</span>@endif
                         </span>
                         <span class="text-money">${{ number_format($item->subtotal, 0, ',', '.') }}</span>
                     </div>
@@ -73,6 +85,16 @@
                         <span>TOTAL</span>
                         <span class="text-money text-blue-700">${{ number_format($venta->total, 0, ',', '.') }}</span>
                     </div>
+                    @if($venta->total_devuelto > 0)
+                    <div class="flex justify-between text-sm text-amber-600 mt-1">
+                        <span>Devoluciones</span>
+                        <span class="text-money">-${{ number_format($venta->total_devuelto, 0, ',', '.') }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm font-bold mt-1">
+                        <span>Total neto</span>
+                        <span class="text-money">${{ number_format($venta->totalNeto(), 0, ',', '.') }}</span>
+                    </div>
+                    @endif
                     @php
                         $gananciaTotal = $venta->historialVentas->sum('ganancia');
                     @endphp
@@ -95,6 +117,7 @@
                         <th>Producto</th>
                         <th>Talla/SKU</th>
                         <th class="text-center">Cantidad</th>
+                        <th class="text-center">Devuelto</th>
                         <th class="text-right">Precio Venta</th>
                         <th class="text-right">Costo</th>
                         <th class="text-right">Subtotal</th>
@@ -108,6 +131,7 @@
                         <td class="font-medium">{{ $det->producto->nombre }}</td>
                         <td class="text-gray-500">{{ $det->talla ?? '—' }}</td>
                         <td class="text-center text-money">{{ $item->cantidad }}</td>
+                        <td class="text-center text-money {{ $item->cantidad_devuelta ? 'text-amber-600 font-semibold' : 'text-gray-300' }}">{{ $item->cantidad_devuelta ?: '—' }}</td>
                         <td class="text-right text-money">${{ number_format($item->precio_venta, 0, ',', '.') }}</td>
                         <td class="text-right text-gray-400 text-money">${{ number_format($item->costo_unitario, 0, ',', '.') }}</td>
                         <td class="text-right font-semibold text-money">${{ number_format($item->subtotal, 0, ',', '.') }}</td>
@@ -146,7 +170,8 @@
                 <div class="flex items-center gap-2">
                     <span class="badge badge-success">Pagado</span>
                     @can('creditos.gestionar')
-                    @if(!$venta->anulada)
+                    {{-- Si una devolución ya se le dio como saldo a favor o reembolso, los abonos la respaldan --}}
+                    @if(!$venta->anulada && !$venta->devoluciones->contains(fn($d) => $d->monto_saldo_favor + $d->monto_reembolso > 0))
                     <form method="POST" action="{{ route('abonos.destroy', $pago) }}"
                           onsubmit="return confirm('¿Anular este abono de ${{ number_format($pago->monto, 0, ',', '.') }}? El saldo de la venta será recalculado.')">
                         @csrf @method('DELETE')
@@ -189,13 +214,18 @@
                             <input type="hidden" name="monto" :value="raw">
                         </div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" x-data="{ sel: @js((string) ($cuentas->first()?->id ?? '')) }">
                         <label class="form-label">¿A qué cuenta entra? *</label>
-                        <select name="id_cuenta_bancaria" class="form-select" required>
+                        <select x-model="sel" class="form-select" required>
                             @foreach($cuentas as $cuenta)
                             <option value="{{ $cuenta->id }}">{{ $cuenta->tipo === 'Efectivo' ? '💵' : '📦' }} {{ $cuenta->nombre }}</option>
                             @endforeach
+                            @if($venta->cliente?->saldo_favor > 0)
+                            <option value="saldo">⭐ Saldo a favor del cliente (${{ number_format($venta->cliente->saldo_favor, 0, ',', '.') }})</option>
+                            @endif
                         </select>
+                        <input type="hidden" name="id_cuenta_bancaria" :value="sel === 'saldo' ? '' : sel">
+                        <input type="hidden" name="usar_saldo_favor" :value="sel === 'saldo' ? 1 : 0">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Observación</label>
@@ -212,6 +242,8 @@
     @endif
     @endcan
     @endif
+
+    @include('ventas.partials.devoluciones')
 
 </div>
 @endsection

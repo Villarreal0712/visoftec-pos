@@ -127,7 +127,7 @@
 <div class="row"><span class="label">Cédula</span><span>{{ $venta->cliente->documento }}</span></div>
 @endif
 @endif
-<div class="row"><span class="label">Método pago</span><span>{{ $venta->metodo_pago }}</span></div>
+<div class="row"><span class="label">Método pago</span><span>{{ $venta->descripcionPago() }}</span></div>
 @if($venta->esMixtoConReparto())
 <div class="row"><span class="label">  Efectivo</span><span>${{ number_format($venta->monto_efectivo, 0, ',', '.') }}</span></div>
 <div class="row"><span class="label">  {{ $venta->cuentaBancaria?->nombre ?? 'Transferencia' }}</span><span>${{ number_format($venta->monto_transferencia, 0, ',', '.') }}</span></div>

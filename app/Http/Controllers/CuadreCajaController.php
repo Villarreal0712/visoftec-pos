@@ -8,6 +8,7 @@ use App\Models\Sucursal;
 use App\Models\GastoExterno;
 use App\Models\LiquidacionPrestamo;
 use App\Models\PagoCredito;
+use App\Models\ReembolsoCliente;
 use App\Models\Venta;
 use App\Traits\HandlesTableFeatures;
 use Illuminate\Http\Request;
@@ -163,6 +164,7 @@ class CuadreCajaController extends Controller
                     'ventas_mixto'           => $t['ventasMixto'],
                     'pagos_credito'          => $t['pagosCredito'],
                     'gastos'                 => $t['gastos'],
+                    'reembolsos'             => $t['reembolsos'],
                     'liquidaciones_externas' => $t['liquidacionesExternas'],
                     'total_sistema'          => $t['totalSistema'],
                     'efectivo_contado'       => $efectivoContado,
@@ -215,6 +217,7 @@ class CuadreCajaController extends Controller
             'ventasMixto'           => (float) ($cuadre->ventas_mixto ?? 0),
             'pagosCredito'          => (float) $cuadre->pagos_credito,
             'gastos'                => (float) $cuadre->gastos,
+            'reembolsos'            => (float) ($cuadre->reembolsos ?? 0),
             'liquidacionesExternas' => (float) ($cuadre->liquidaciones_externas ?? 0),
             'totalSistema'          => (float) $cuadre->total_sistema,
             // El reparto efectivo/electrónico no se guarda al cerrar (solo se usa con la caja
@@ -236,7 +239,8 @@ class CuadreCajaController extends Controller
             ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
             ->where('metodo_pago', $metodo)
             ->where('es_credito', false)
-            ->sum('total');
+            // La parte pagada con saldo a favor no es dinero que entra hoy
+            ->sum(DB::raw('total - COALESCE(monto_saldo_favor, 0)'));
 
         $t = [
             'ventasEfectivo'      => (float) $ventas(Venta::METODO_EFECTIVO),
@@ -244,7 +248,7 @@ class CuadreCajaController extends Controller
             'ventasTransferencia' => (float) $ventas(Venta::METODO_TRANSFERENCIA),
             'ventasMixto'         => (float) $ventas('Mixto'),
             // Abonos recibidos en este local (aunque la venta sea de otra sucursal: la plata entró aquí)
-            'pagosCredito'        => (float) PagoCredito::whereBetween('created_at', [$inicio, $fin])
+            'pagosCredito'        => (float) PagoCredito::conDinero()->whereBetween('created_at', [$inicio, $fin])
                 ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
                 ->sum('monto'),
             'gastos'              => (float) GastoExterno::entreFechas($inicio, $fin)
@@ -252,6 +256,11 @@ class CuadreCajaController extends Controller
                 ->sum('valor'),
             // Pagos a locales externos (liquidaciones de préstamos)
             'liquidacionesExternas' => (float) LiquidacionPrestamo::entreFechas($inicio, $fin)->sum('monto'),
+            // Dinero devuelto a clientes desde el cajón (devoluciones o saldo a favor reembolsado);
+            // como los gastos, los que salen de una cuenta Banco no pesan en el efectivo.
+            'reembolsos'          => (float) ReembolsoCliente::enEfectivo()->entreFechas($inicio, $fin)
+                ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
+                ->sum('monto'),
         ];
 
         // Solo los gastos pagados en Efectivo (o sin cuenta asociada) afectan el efectivo esperado;
@@ -260,7 +269,7 @@ class CuadreCajaController extends Controller
 
         $t['totalSistema'] = $saldoInicial
             + $t['ventasEfectivo'] + $t['ventasTarjeta'] + $t['ventasTransferencia'] + $t['ventasMixto']
-            + $t['pagosCredito'] - $gastosEfectivo - $t['liquidacionesExternas'];
+            + $t['pagosCredito'] - $gastosEfectivo - $t['reembolsos'] - $t['liquidacionesExternas'];
 
         // ── Reparto efectivo / electrónico (solo para la "Referencia del sistema" del cierre).
         // No cambia totalSistema ni la diferencia: solo dice cuánto debería haber en el cajón y
@@ -276,7 +285,7 @@ class CuadreCajaController extends Controller
             ->sum('monto_efectivo');
         $t['mixtoElectronico'] = $t['ventasMixto'] - $t['mixtoEfectivo'];
         // Abonos en efectivo = sin cuenta (histórico) o a una cuenta tipo Efectivo
-        $t['pagosCreditoEfectivo'] = (float) PagoCredito::whereBetween('created_at', [$inicio, $fin])
+        $t['pagosCreditoEfectivo'] = (float) PagoCredito::conDinero()->whereBetween('created_at', [$inicio, $fin])
             ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
             ->where(fn($q) => $q->whereNull('id_cuenta_bancaria')
                 ->orWhereHas('cuentaBancaria', fn($c) => $c->where('tipo', CuentaBancaria::TIPO_EFECTIVO)))
@@ -302,7 +311,7 @@ class CuadreCajaController extends Controller
                 ->entreFechas($inicio, $fin)
                 ->latest()
                 ->get(),
-            'pagosDetalle' => PagoCredito::with(['venta.cliente'])
+            'pagosDetalle' => PagoCredito::conDinero()->with(['venta.cliente'])
                 ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
                 ->whereBetween('created_at', [$inicio, $fin])
                 ->get(),
@@ -311,6 +320,10 @@ class CuadreCajaController extends Controller
                 ->entreFechas($inicio, $fin)
                 ->get(),
             'liquidacionesDetalle' => LiquidacionPrestamo::with(['localExterno', 'usuario'])
+                ->entreFechas($inicio, $fin)
+                ->get(),
+            'reembolsosDetalle' => ReembolsoCliente::enEfectivo()->with(['cliente', 'devolucion', 'usuario'])
+                ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
                 ->entreFechas($inicio, $fin)
                 ->get(),
             // Desglose informativo: cuánto quedó en cada cuenta bancaria dinámica (ventas + abonos).
@@ -384,20 +397,31 @@ class CuadreCajaController extends Controller
             ->filter(fn($g) => $g->cuentaBancaria?->tipo === CuentaBancaria::TIPO_BANCO)
             ->groupBy('id_cuenta_bancaria');
 
-        $idsCuentas = $ventasPorCuenta->keys()->merge($pagosPorCuenta->keys())->merge($gastosPorCuenta->keys())->unique();
+        // Reembolsos a clientes hechos desde una cuenta Banco (salen de esa cuenta, como los gastos)
+        $reembolsosPorCuenta = ReembolsoCliente::entreFechas($inicio, $fin)->whereNotNull('id_cuenta_bancaria')
+            ->when($idSucursal, fn($q) => $q->where('id_sucursal', $idSucursal))
+            ->with('cuentaBancaria')->get()
+            ->filter(fn($r) => $r->cuentaBancaria?->tipo === CuentaBancaria::TIPO_BANCO)
+            ->groupBy('id_cuenta_bancaria');
 
-        return $idsCuentas->map(function ($idCuenta) use ($ventasPorCuenta, $pagosPorCuenta, $gastosPorCuenta) {
+        $idsCuentas = $ventasPorCuenta->keys()->merge($pagosPorCuenta->keys())->merge($gastosPorCuenta->keys())
+            ->merge($reembolsosPorCuenta->keys())->unique();
+
+        return $idsCuentas->map(function ($idCuenta) use ($ventasPorCuenta, $pagosPorCuenta, $gastosPorCuenta, $reembolsosPorCuenta) {
             $grupoVentas = $ventasPorCuenta->get($idCuenta, collect());
             $grupoPagos  = $pagosPorCuenta->get($idCuenta, collect());
             $grupoGastos = $gastosPorCuenta->get($idCuenta, collect());
+            $grupoReembolsos = $reembolsosPorCuenta->get($idCuenta, collect());
             $cuenta = $grupoVentas->first()->cuentaBancaria
                 ?? $grupoPagos->first()->cuentaBancaria
-                ?? $grupoGastos->first()->cuentaBancaria;
+                ?? $grupoGastos->first()->cuentaBancaria
+                ?? $grupoReembolsos->first()->cuentaBancaria;
 
             return [
                 'nombre' => $cuenta->nombre,
                 // montoEnCuenta(): en una venta mixta solo cuenta la parte por transferencia
-                'total'  => $grupoVentas->sum(fn($v) => $v->montoEnCuenta()) + $grupoPagos->sum('monto') - $grupoGastos->sum('valor'),
+                'total'  => $grupoVentas->sum(fn($v) => $v->montoEnCuenta()) + $grupoPagos->sum('monto')
+                            - $grupoGastos->sum('valor') - $grupoReembolsos->sum('monto'),
             ];
         })->sortByDesc('total')->values();
     }

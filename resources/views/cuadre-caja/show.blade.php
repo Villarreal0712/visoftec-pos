@@ -76,6 +76,9 @@
                 @if($gastos > $gastosEfectivo)
                 <div class="flex justify-between text-xs pl-3"><span class="text-gray-500">+ pagados desde cuenta bancaria (no afectan la caja)</span><span class="text-gray-400 text-money">${{ number_format($gastos - $gastosEfectivo, 0, ',', '.') }}</span></div>
                 @endif
+                @if($reembolsos > 0)
+                <div class="flex justify-between text-sm"><span class="text-gray-400">− Reembolsos a clientes</span><span class="text-red-400 text-money">-${{ number_format($reembolsos, 0, ',', '.') }}</span></div>
+                @endif
                 @if($liquidacionesExternas > 0)
                 <div class="flex justify-between text-sm"><span class="text-gray-400">− Pagos a externos</span><span class="text-orange-400 text-money">-${{ number_format($liquidacionesExternas, 0, ',', '.') }}</span></div>
                 @endif
@@ -94,7 +97,7 @@
             // - la parte en efectivo de las ventas mixtas va al cajón, el resto a transferencias;
             // - los abonos y gastos van al lado por el que realmente entró/salió la plata.
             $efectivoEsperado    = $cuadreCaja->saldo_inicial + $ventasEfectivo + $mixtoEfectivo
-                                 + $pagosCreditoEfectivo - $gastosEfectivo - $liquidacionesExternas;
+                                 + $pagosCreditoEfectivo - $gastosEfectivo - $reembolsos - $liquidacionesExternas;
             $electronicoEsperado = $ventasTarjeta + $ventasTransferencia + $mixtoElectronico + $pagosCreditoElectronico;
         @endphp
         <div class="card">
@@ -250,6 +253,19 @@
                 @if($gastosDetalle->isEmpty())<p class="text-center text-gray-400 text-sm py-4">Sin gastos</p>@endif
             </div>
         </div>
+        @if($reembolsosDetalle->isNotEmpty())
+        <div class="card">
+            <div class="card-header"><h3 class="card-title text-sm">Reembolsos a clientes ({{ $reembolsosDetalle->count() }})</h3></div>
+            <div class="overflow-y-auto max-h-64">
+                @foreach($reembolsosDetalle as $r)
+                <div class="flex justify-between px-4 py-2 border-b border-gray-50 text-sm">
+                    <span class="text-gray-600 truncate">{{ $r->cliente?->nombre ?? 'Sin cliente' }} · {{ $r->devolucion ? 'Devolución venta #' . $r->devolucion->id_venta : 'Saldo a favor' }}</span>
+                    <span class="font-medium text-money text-red-600 ml-2">-${{ number_format($r->monto, 0, ',', '.') }}</span>
+                </div>
+                @endforeach
+            </div>
+        </div>
+        @endif
     </div>
 
 </div>

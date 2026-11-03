@@ -40,18 +40,22 @@
         <div class="card md:col-span-2">
             <div class="card-header"><h3 class="card-title">Resumen Financiero</h3></div>
             <div class="card-body">
-                <div class="grid grid-cols-3 gap-4 mb-5">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
                     <div class="text-center p-3 bg-blue-50 rounded-xl">
                         <p class="text-2xl font-extrabold text-blue-700 text-money">{{ $cliente->ventas->count() }}</p>
                         <p class="text-xs text-gray-500 mt-1">Compras totales</p>
                     </div>
                     <div class="text-center p-3 bg-emerald-50 rounded-xl">
-                        <p class="text-lg font-extrabold text-emerald-700 text-money">${{ number_format($cliente->ventas->sum('total'), 0, ',', '.') }}</p>
+                        <p class="text-lg font-extrabold text-emerald-700 text-money">${{ number_format($totalCompras, 0, ',', '.') }}</p>
                         <p class="text-xs text-gray-500 mt-1">Total comprado</p>
                     </div>
                     <div class="text-center p-3 {{ $saldoPendiente > 0 ? 'bg-red-50' : 'bg-gray-50' }} rounded-xl">
                         <p class="text-lg font-extrabold {{ $saldoPendiente > 0 ? 'text-red-600' : 'text-gray-500' }} text-money">${{ number_format($saldoPendiente, 0, ',', '.') }}</p>
                         <p class="text-xs text-gray-500 mt-1">Saldo pendiente</p>
+                    </div>
+                    <div class="text-center p-3 {{ $cliente->saldo_favor > 0 ? 'bg-emerald-50' : 'bg-gray-50' }} rounded-xl">
+                        <p class="text-lg font-extrabold {{ $cliente->saldo_favor > 0 ? 'text-emerald-600' : 'text-gray-500' }} text-money">${{ number_format($cliente->saldo_favor, 0, ',', '.') }}</p>
+                        <p class="text-xs text-gray-500 mt-1">Saldo a favor</p>
                     </div>
                 </div>
 
@@ -122,6 +126,8 @@
     </div>
     @endif
 
+    @include('clientes.partials.saldo-favor')
+
     {{-- Historial de compras --}}
     <div class="card">
         <div class="card-header">
@@ -146,9 +152,14 @@
                         <td><a href="{{ route('ventas.show', $venta) }}" class="text-blue-600 font-medium hover:underline">#{{ str_pad($venta->id, 5, '0', STR_PAD_LEFT) }}</a></td>
                         <td class="text-sm text-gray-600">{{ $venta->created_at->format('d/m/Y H:i') }}</td>
                         <td><span class="badge badge-info">{{ $venta->metodo_pago }}</span></td>
-                        <td class="text-right font-bold text-money">${{ number_format($venta->total, 0, ',', '.') }}</td>
+                        <td class="text-right font-bold text-money">
+                            ${{ number_format($venta->total, 0, ',', '.') }}
+                            @if($venta->total_devuelto > 0)<p class="text-xs font-normal text-amber-600">devuelto -${{ number_format($venta->total_devuelto, 0, ',', '.') }}</p>@endif
+                        </td>
                         <td class="text-center">
-                            @if(!$venta->es_credito || $venta->estado_credito === 'Pagado')
+                            @if($venta->anulada)
+                                <span class="badge badge-danger">Anulada</span>
+                            @elseif(!$venta->es_credito || $venta->estado_credito === 'Pagado')
                                 <span class="badge badge-success">Pagado</span>
                             @elseif($venta->estado_credito === 'Mora')
                                 <span class="badge badge-danger">Mora</span>
@@ -417,7 +428,14 @@
                                         <span class="block text-center text-xs font-medium py-2 rounded-lg border-2 transition-colors cursor-pointer peer-checked:border-blue-500 peer-checked:bg-blue-50 peer-checked:text-blue-700 border-gray-200 text-gray-500 hover:border-gray-300">{{ $cuenta->tipo === 'Efectivo' ? '💵' : '📦' }} {{ $cuenta->nombre }}</span>
                                     </label>
                                     @endforeach
+                                    <template x-if="saldoFavor > 0">
+                                    <label class="flex-1 cursor-pointer">
+                                        <input type="radio" value="saldo" x-model="idCuentaBancaria" class="sr-only peer">
+                                        <span class="block text-center text-xs font-medium py-2 rounded-lg border-2 transition-colors cursor-pointer peer-checked:border-emerald-500 peer-checked:bg-emerald-50 peer-checked:text-emerald-700 border-gray-200 text-gray-500 hover:border-gray-300">⭐ Saldo a favor (<span x-text="'$' + saldoFavor.toLocaleString('es-CO')"></span>)</span>
+                                    </label>
+                                    </template>
                                 </div>
+                                <p x-show="idCuentaBancaria === 'saldo' && montoActual > saldoFavor" class="text-xs text-red-500 mt-1">El monto supera el saldo a favor del cliente</p>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Observación <span class="text-gray-400 font-normal">(opcional)</span></label>
@@ -434,7 +452,7 @@
                 <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
                     <button @click="cerrar()" type="button" class="btn btn-secondary">Cancelar</button>
                     <button @click="enviar()" type="button"
-                        :disabled="enviando || (modo === 'venta' ? monto <= 0 : montoGlobal <= 0 || montoGlobal > totalDeuda) || !idCuentaBancaria"
+                        :disabled="enviando || (modo === 'venta' ? monto <= 0 : montoGlobal <= 0 || montoGlobal > totalDeuda) || !idCuentaBancaria || (idCuentaBancaria === 'saldo' && montoActual > saldoFavor)"
                         class="btn-success px-6 py-2 rounded-xl font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
                         <template x-if="enviando">
                             <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -455,7 +473,7 @@ function modalAbono(cuentas) {
     return {
         abierto: false, cargando: false, enviando: false, error: null,
         clienteNombre: '', urlCreditos: '', urlAbonoMixto: '',
-        totalDeuda: 0, creditos: [],
+        totalDeuda: 0, creditos: [], saldoFavor: 0,
         creditoSeleccionado: 0, monto: 0, montoGlobal: 0,
         cuentas: cuentas || [],
         idCuentaBancaria: cuentas?.[0] ? String(cuentas[0].id) : '',
@@ -464,6 +482,13 @@ function modalAbono(cuentas) {
         necesitaRecargar: false, ticketAbierto: false, ticketUrl: '',
 
         get creditoActual() { return this.creditos[this.creditoSeleccionado] ?? null; },
+        get montoActual() { return this.modo === 'global' ? this.montoGlobal : this.monto; },
+
+        // Pagar con saldo a favor manda usar_saldo_favor en vez de una cuenta
+        agregarMedioPago(body) {
+            if (this.idCuentaBancaria === 'saldo') body.append('usar_saldo_favor', '1');
+            else body.append('id_cuenta_bancaria', this.idCuentaBancaria);
+        },
 
         get distribucion() {
             if (this.montoGlobal <= 0) return [];
@@ -490,7 +515,7 @@ function modalAbono(cuentas) {
                 const res = await fetch(url, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
                 if (!res.ok) throw new Error();
                 const data = await res.json();
-                this.totalDeuda = data.total_deuda; this.creditos = data.creditos;
+                this.totalDeuda = data.total_deuda; this.creditos = data.creditos; this.saldoFavor = data.saldo_favor || 0;
             } catch { this.error = 'No se pudieron cargar los créditos. Intenta de nuevo.'; }
             finally { this.cargando = false; }
         },
@@ -516,7 +541,7 @@ function modalAbono(cuentas) {
                 const token = document.querySelector('meta[name="csrf-token"]').content;
                 const body = new FormData();
                 body.append('_token', token); body.append('monto', this.monto);
-                body.append('id_cuenta_bancaria', this.idCuentaBancaria);
+                this.agregarMedioPago(body);
                 if (this.observacion) body.append('observacion', this.observacion);
                 const res = await fetch(credito.url_abonar, { method: 'POST', headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body });
                 if (!res.ok) {
@@ -539,7 +564,7 @@ function modalAbono(cuentas) {
                 const token = document.querySelector('meta[name="csrf-token"]').content;
                 const body = new FormData();
                 body.append('_token', token); body.append('monto_total', this.montoGlobal);
-                body.append('id_cuenta_bancaria', this.idCuentaBancaria);
+                this.agregarMedioPago(body);
                 if (this.observacion) body.append('observacion', this.observacion);
                 const res = await fetch(this.urlAbonoMixto, { method: 'POST', headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body });
                 if (!res.ok) {
@@ -565,7 +590,8 @@ function modalAbono(cuentas) {
                 const r = await fetch(this.urlCreditos, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
                 if (!r.ok) throw new Error();
                 const d = await r.json();
-                this.totalDeuda = d.total_deuda; this.creditos = d.creditos; this.creditoSeleccionado = 0;
+                this.totalDeuda = d.total_deuda; this.creditos = d.creditos; this.creditoSeleccionado = 0; this.saldoFavor = d.saldo_favor || 0;
+                if (this.idCuentaBancaria === 'saldo' && this.saldoFavor <= 0) this.idCuentaBancaria = this.cuentas?.[0] ? String(this.cuentas[0].id) : '';
                 if (this.creditos.length === 0) setTimeout(() => this.cerrar(), 1200);
             } catch { setTimeout(() => window.location.reload(), 500); }
             finally { this.cargando = false; }

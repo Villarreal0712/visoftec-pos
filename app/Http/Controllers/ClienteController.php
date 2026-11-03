@@ -6,11 +6,14 @@ use App\Models\Cliente;
 use App\Models\Configuracion;
 use App\Models\CuentaBancaria;
 use App\Models\MovimientoCuentaBancaria;
+use App\Models\MovimientoSaldoCliente;
 use App\Models\PagoCredito;
+use App\Models\ReembolsoCliente;
 use App\Models\Venta;
 use App\Traits\HandlesTableFeatures;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 class ClienteController extends Controller
@@ -89,11 +92,12 @@ class ClienteController extends Controller
         $ventasCredito = $ventas->filter(fn($v) => !$v->anulada && $v->es_credito && $v->estado_credito !== Venta::ESTADO_PAGADO);
         $totalDeuda = $ventasCredito->sum('saldo_pendiente');
         $saldoPendiente = $totalDeuda;
-        $totalCompras = $ventas->where('anulada', false)->sum('total');
+        $totalCompras = $ventas->where('anulada', false)->sum(fn($v) => $v->totalNeto());
+        $movimientosSaldo = $cliente->movimientosSaldo()->with('usuario')->limit(30)->get();
 
         $cuentas = CuentaBancaria::activas()->orderByRaw("tipo = 'Efectivo' desc")->orderBy('nombre')->get(['id', 'nombre', 'tipo']);
 
-        return view('clientes.show', compact('cliente', 'ventas', 'ventasCredito', 'totalDeuda', 'saldoPendiente', 'totalCompras', 'cuentas'));
+        return view('clientes.show', compact('cliente', 'ventas', 'ventasCredito', 'totalDeuda', 'saldoPendiente', 'totalCompras', 'cuentas', 'movimientosSaldo'));
     }
 
     public function edit(Cliente $cliente)
@@ -180,6 +184,7 @@ class ClienteController extends Controller
         return response()->json([
             'cliente'     => $cliente->nombre,
             'total_deuda' => (float) $cliente->saldo_pendiente_total,
+            'saldo_favor' => (float) $cliente->saldo_favor,
             'creditos'    => $creditos,
         ]);
     }
@@ -191,8 +196,9 @@ class ClienteController extends Controller
     {
         $request->validate([
             'monto_total'        => 'required|numeric|min:0.01|max:99999999',
-            'metodo'             => 'required_without:id_cuenta_bancaria|nullable|in:Efectivo,Tarjeta,Transferencia',
+            'metodo'             => 'required_without_all:id_cuenta_bancaria,usar_saldo_favor|nullable|in:Efectivo,Tarjeta,Transferencia',
             'id_cuenta_bancaria' => ['nullable', Rule::exists('cuentas_bancarias', 'id')->where('activo', true)],
+            'usar_saldo_favor'   => 'nullable|boolean',
             'observacion'        => 'nullable|string|max:200',
         ]);
 
@@ -222,8 +228,12 @@ class ClienteController extends Controller
                 // para que el Cuadre de Caja siga sumando por los mismos valores de siempre.
                 $cuentaBancaria = null;
                 $metodo = $request->metodo ?: Venta::METODO_EFECTIVO;
+                $clienteSaldo = null;
 
-                if ($request->filled('id_cuenta_bancaria')) {
+                if ($request->boolean('usar_saldo_favor')) {
+                    $clienteSaldo = Cliente::lockForUpdate()->findOrFail($cliente->id);
+                    $metodo = Venta::METODO_SALDO_FAVOR;
+                } elseif ($request->filled('id_cuenta_bancaria')) {
                     $cuentaBancaria = CuentaBancaria::lockForUpdate()->findOrFail($request->id_cuenta_bancaria);
                     $metodo = $cuentaBancaria->tipo === CuentaBancaria::TIPO_EFECTIVO
                         ? Venta::METODO_EFECTIVO
@@ -238,7 +248,7 @@ class ClienteController extends Controller
 
                     $abono = min($restante, (float) $venta->saldo_pendiente);
 
-                    $creados[] = PagoCredito::create([
+                    $creados[] = $pago = PagoCredito::create([
                         'id_venta'           => $venta->id,
                         'id_usuario'         => auth()->id(),
                         'id_sucursal'        => auth()->user()->id_sucursal ?? 1,
@@ -247,6 +257,11 @@ class ClienteController extends Controller
                         'id_cuenta_bancaria' => $cuentaBancaria?->id,
                         'observacion'        => $request->observacion ?? null,
                     ]);
+
+                    // Un movimiento por abono, para poder devolverlo si se anula ese abono
+                    $clienteSaldo?->moverSaldoFavor(-$abono, MovimientoSaldoCliente::TIPO_ABONO,
+                        ['id_venta' => $venta->id, 'id_pago_credito' => $pago->id],
+                        "Abono a la venta #{$venta->id}");
 
                     $venta->actualizarEstadoCredito();
                     $restante -= $abono;
@@ -307,10 +322,12 @@ class ClienteController extends Controller
     {
         $validated = $request->validate([
             'monto'              => 'required|numeric|min:0.01|max:99999999',
-            'metodo'             => 'required_without:id_cuenta_bancaria|nullable|in:Efectivo,Tarjeta,Transferencia',
+            'metodo'             => 'required_without_all:id_cuenta_bancaria,usar_saldo_favor|nullable|in:Efectivo,Tarjeta,Transferencia',
             'id_cuenta_bancaria' => ['nullable', Rule::exists('cuentas_bancarias', 'id')->where('activo', true)],
+            'usar_saldo_favor'   => 'nullable|boolean',
             'observacion'        => 'nullable|string|max:200',
         ]);
+        $validated['usar_saldo_favor'] = $request->boolean('usar_saldo_favor');
 
         try {
             $pago = DB::transaction(function () use ($validated, $venta) {
@@ -327,8 +344,16 @@ class ClienteController extends Controller
                 // igual que en ventas, para que el Cuadre de Caja siga sumando por los mismos valores.
                 $cuentaBancaria = null;
                 $metodo = $validated['metodo'] ?? Venta::METODO_EFECTIVO;
+                $cliente = null;
 
-                if (!empty($validated['id_cuenta_bancaria'])) {
+                if ($validated['usar_saldo_favor']) {
+                    // Pagado con saldo a favor: no entra dinero a caja ni a ninguna cuenta
+                    if (!$ventaLock->id_cliente) {
+                        throw new \Exception('Esta venta no tiene cliente asociado.');
+                    }
+                    $cliente = Cliente::lockForUpdate()->findOrFail($ventaLock->id_cliente);
+                    $metodo = Venta::METODO_SALDO_FAVOR;
+                } elseif (!empty($validated['id_cuenta_bancaria'])) {
                     $cuentaBancaria = CuentaBancaria::lockForUpdate()->findOrFail($validated['id_cuenta_bancaria']);
                     $metodo = $cuentaBancaria->tipo === CuentaBancaria::TIPO_EFECTIVO
                         ? Venta::METODO_EFECTIVO
@@ -345,6 +370,12 @@ class ClienteController extends Controller
                     'id_cuenta_bancaria' => $cuentaBancaria?->id,
                     'observacion'        => $validated['observacion'] ?? null,
                 ]);
+
+                if ($cliente) {
+                    $cliente->moverSaldoFavor(-(float) $validated['monto'], MovimientoSaldoCliente::TIPO_ABONO,
+                        ['id_venta' => $ventaLock->id, 'id_pago_credito' => $pago->id],
+                        "Abono a la venta #{$ventaLock->id}");
+                }
 
                 if ($cuentaBancaria && $cuentaBancaria->tipo !== CuentaBancaria::TIPO_EFECTIVO) {
                     $cuentaBancaria->registrarMovimiento(
@@ -393,6 +424,12 @@ class ClienteController extends Controller
                     throw new \Exception('La venta ya está anulada.');
                 }
 
+                // Lo que una devolución dejó como saldo a favor o reembolsó salió de lo que ya
+                // estaba pagado: quitar un abono dejaría ese saldo sin respaldo.
+                if ($venta->devoluciones()->whereRaw('monto_saldo_favor + monto_reembolso > 0')->exists()) {
+                    throw new \Exception('No se puede anular: este abono respalda una devolución que ya se le dio al cliente como saldo a favor o reembolso.');
+                }
+
                 // Revertir el dinero de la cuenta bancaria para que su saldo siga reflejando la realidad.
                 // Efectivo no se toca aquí: su saldo lo maneja el Cuadre de Caja, no este ledger.
                 if ($pagoLock->id_cuenta_bancaria) {
@@ -407,6 +444,13 @@ class ClienteController extends Controller
                     }
                 }
 
+                // Si se pagó con saldo a favor, el cliente lo recupera
+                if ($pagoLock->metodo === Venta::METODO_SALDO_FAVOR && $venta->id_cliente) {
+                    Cliente::lockForUpdate()->findOrFail($venta->id_cliente)->moverSaldoFavor(
+                        (float) $pagoLock->monto, MovimientoSaldoCliente::TIPO_ANULACION,
+                        ['id_venta' => $venta->id], "Anulación abono #{$pagoLock->id} de la venta #{$venta->id}");
+                }
+
                 $pagoLock->delete();
                 $venta->actualizarEstadoCredito();
             });
@@ -417,6 +461,54 @@ class ClienteController extends Controller
         }
 
         return back()->with('success', 'Abono anulado. El saldo de la venta fue recalculado.');
+    }
+
+    /**
+     * Le devuelve al cliente en dinero (todo o parte de) su saldo a favor
+     */
+    public function reembolsarSaldo(Request $request, Cliente $cliente)
+    {
+        // El layout solo muestra mensajes 'error' (no la bolsa de errores de validación)
+        $validator = Validator::make($request->all(), [
+            'monto'              => 'required|numeric|min:0.01|max:99999999',
+            'id_cuenta_bancaria' => ['nullable', Rule::exists('cuentas_bancarias', 'id')->where('activo', true)],
+            'observacion'        => 'nullable|string|max:200',
+        ]);
+        if ($validator->fails()) {
+            return back()->with('error', $validator->errors()->first());
+        }
+
+        try {
+            DB::transaction(function () use ($request, $cliente) {
+                $clienteLock = Cliente::lockForUpdate()->findOrFail($cliente->id);
+                $monto = round((float) $request->monto, 2);
+                $cuenta = $request->filled('id_cuenta_bancaria')
+                    ? CuentaBancaria::lockForUpdate()->findOrFail($request->id_cuenta_bancaria)
+                    : null;
+
+                $reembolso = ReembolsoCliente::create([
+                    'id_cliente'         => $clienteLock->id,
+                    'id_usuario'         => auth()->id(),
+                    // Sucursal de donde sale la plata (la de quien entrega), como los abonos
+                    'id_sucursal'        => auth()->user()->id_sucursal ?? 1,
+                    'monto'              => $monto,
+                    'id_cuenta_bancaria' => $cuenta?->id,
+                    'observacion'        => $request->observacion,
+                ]);
+
+                $clienteLock->moverSaldoFavor(-$monto, MovimientoSaldoCliente::TIPO_REEMBOLSO,
+                    ['id_reembolso' => $reembolso->id], $request->observacion ?: 'Reembolso del saldo a favor');
+
+                if ($cuenta && $cuenta->tipo !== CuentaBancaria::TIPO_EFECTIVO) {
+                    $cuenta->registrarMovimiento($monto, MovimientoCuentaBancaria::TIPO_RETIRO, null,
+                        "Reembolso saldo a favor de {$clienteLock->nombre}");
+                }
+            });
+        } catch (\Exception $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        return back()->with('success', 'Reembolso registrado. El saldo a favor del cliente fue actualizado.');
     }
 
     /**

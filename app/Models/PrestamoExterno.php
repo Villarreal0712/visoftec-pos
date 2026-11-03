@@ -82,6 +82,24 @@ class PrestamoExterno extends Model
             : null;
     }
 
+    /**
+     * ¿Quitar $montoQueSeQuita de la deuda con este local la dejaría por debajo de lo que ya
+     * se le pagó? El estado "liquidado" por préstamo nunca se asigna (las liquidaciones se
+     * registran agregadas por local), así que se compara contra los pagos registrados.
+     */
+    public static function deudaYaCubierta(int $idLocalExterno, float $montoQueSeQuita): bool
+    {
+        $totalPendienteLocal = self::where('id_local_externo', $idLocalExterno)
+            ->where('estado', self::ESTADO_PENDIENTE)
+            ->whereNotNull('costo_acordado')
+            ->get()
+            ->sum('total_deuda');
+
+        $totalLiquidadoLocal = LiquidacionPrestamo::where('id_local_externo', $idLocalExterno)->sum('monto');
+
+        return $totalLiquidadoLocal > $totalPendienteLocal - $montoQueSeQuita;
+    }
+
     public function scopePendientes($query)
     {
         return $query->where('estado', self::ESTADO_PENDIENTE);

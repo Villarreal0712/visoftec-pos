@@ -22,10 +22,12 @@ class Venta extends Model
         'id_cuenta_bancaria',
         'monto_efectivo',
         'monto_transferencia',
+        'monto_saldo_favor',
         'fecha_vencimiento',
         'saldo_pendiente',
         'estado_credito',
         'total',
+        'total_devuelto',
         'observaciones',
         'anulada',
         'motivo_anulacion',
@@ -40,6 +42,8 @@ class Venta extends Model
         'total' => 'decimal:2',
         'monto_efectivo' => 'decimal:2',
         'monto_transferencia' => 'decimal:2',
+        'monto_saldo_favor' => 'decimal:2',
+        'total_devuelto' => 'decimal:2',
     ];
 
     // Estados de crédito
@@ -53,6 +57,8 @@ class Venta extends Model
     const METODO_TRANSFERENCIA = 'Transferencia';
     const METODO_CREDITO = 'Crédito';
     const METODO_MIXTO = 'Mixto';
+    /** Toda la venta se pagó con saldo a favor (si solo fue una parte, el método es el del resto). */
+    const METODO_SALDO_FAVOR = 'Saldo a favor';
 
     /** Venta mixta con el reparto guardado (las mixtas anteriores al 2026-10-28 no lo tienen). */
     public function esMixtoConReparto(): bool
@@ -67,18 +73,39 @@ class Venta extends Model
      */
     public function montoEnCuenta(): float
     {
-        return $this->esMixtoConReparto() ? (float) $this->monto_transferencia : (float) $this->total;
+        return $this->esMixtoConReparto() ? (float) $this->monto_transferencia : $this->montoEnDinero();
     }
 
-    /** Texto del medio de pago; en una mixta incluye el reparto. */
+    /** Lo que se pagó con dinero: el total menos la parte pagada con saldo a favor. */
+    public function montoEnDinero(): float
+    {
+        return (float) $this->total - (float) ($this->monto_saldo_favor ?? 0);
+    }
+
+    /** Total después de devoluciones. */
+    public function totalNeto(): float
+    {
+        return (float) $this->total - (float) $this->total_devuelto;
+    }
+
+    /** Texto del medio de pago; en una mixta incluye el reparto y, si aplica, el saldo a favor usado. */
     public function descripcionPago(): string
     {
-        if (!$this->esMixtoConReparto()) {
-            return (string) $this->metodo_pago;
-        }
         $f = fn($v) => '$' . number_format((float) $v, 0, ',', '.');
-        $cuenta = $this->cuentaBancaria?->nombre ?? 'transferencia';
-        return "Mixto: efectivo {$f($this->monto_efectivo)} + {$cuenta} {$f($this->monto_transferencia)}";
+
+        $texto = (string) $this->metodo_pago;
+        if ($this->esMixtoConReparto()) {
+            $cuenta = $this->cuentaBancaria?->nombre ?? 'transferencia';
+            $texto = "Mixto: efectivo {$f($this->monto_efectivo)} + {$cuenta} {$f($this->monto_transferencia)}";
+        }
+
+        if ($this->monto_saldo_favor > 0 && $this->metodo_pago !== self::METODO_SALDO_FAVOR) {
+            // La mixta ya trae sus montos; a un método simple se le agrega el valor pagado
+            $resto = $this->esMixtoConReparto() ? $texto : "{$texto} {$f($this->montoEnDinero())}";
+            $texto = "Saldo a favor {$f($this->monto_saldo_favor)} + {$resto}";
+        }
+
+        return $texto;
     }
 
     public function usuario(): BelongsTo
@@ -116,6 +143,11 @@ class Venta extends Model
         return $this->hasMany(PrestamoExterno::class, 'id_venta');
     }
 
+    public function devoluciones(): HasMany
+    {
+        return $this->hasMany(Devolucion::class, 'id_venta');
+    }
+
     /**
      * Calcula el total de la venta sumando los ítems
      */
@@ -137,7 +169,8 @@ class Venta extends Model
      */
     public function actualizarEstadoCredito(): void
     {
-        $totalVenta = $this->total;
+        // Lo devuelto ya no se debe
+        $totalVenta = $this->totalNeto();
         $totalPagado = $this->total_pagado;
         $saldo = $totalVenta - $totalPagado;
 

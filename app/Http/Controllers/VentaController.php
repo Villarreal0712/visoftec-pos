@@ -10,9 +10,9 @@ use App\Models\MovimientoCuentaBancaria;
 use App\Models\DetalleProducto;
 use App\Models\HistorialMovimiento;
 use App\Models\HistorialVenta;
-use App\Models\LiquidacionPrestamo;
 use App\Models\LocalExterno;
 use App\Models\LoteInventario;
+use App\Models\MovimientoSaldoCliente;
 use App\Models\PrestamoExterno;
 use App\Models\Sucursal;
 use App\Models\Venta;
@@ -86,8 +86,9 @@ class VentaController extends Controller
                                   ->first();
         $cuentas = CuentaBancaria::activas()->orderByRaw("tipo = 'Efectivo' desc")->orderBy('nombre')->get(['id', 'nombre', 'tipo']);
         $bodegaEsAcopio = Bodega::find(auth()->user()->id_bodega ?? 1)?->id_sucursal === null;
+        $saldosFavor = $this->saldosFavorClientes();
 
-        return view('ventas.create', compact('clientes', 'localesExternos', 'puedeVenderPrestamo', 'cajaAbierta', 'cuentas', 'bodegaEsAcopio'));
+        return view('ventas.create', compact('clientes', 'localesExternos', 'puedeVenderPrestamo', 'cajaAbierta', 'cuentas', 'bodegaEsAcopio', 'saldosFavor'));
     }
 
     public function createMovil()
@@ -100,6 +101,7 @@ class VentaController extends Controller
                                   ->first();
         $cuentas = CuentaBancaria::activas()->orderByRaw("tipo = 'Efectivo' desc")->orderBy('nombre')->get(['id', 'nombre', 'tipo']);
         $bodegaEsAcopio = Bodega::find(auth()->user()->id_bodega ?? 1)?->id_sucursal === null;
+        $saldosFavor = $this->saldosFavorClientes();
 
         // Pre-carga de producto desde la pantalla de Consulta
         $preloadBarcode = null;
@@ -108,7 +110,7 @@ class VentaController extends Controller
             $preloadBarcode = $detalle?->codigo_barras;
         }
 
-        return view('ventas.pos-movil', compact('clientes', 'localesExternos', 'puedeVenderPrestamo', 'cajaAbierta', 'preloadBarcode', 'cuentas', 'bodegaEsAcopio'));
+        return view('ventas.pos-movil', compact('clientes', 'localesExternos', 'puedeVenderPrestamo', 'cajaAbierta', 'preloadBarcode', 'cuentas', 'bodegaEsAcopio', 'saldosFavor'));
     }
 
     public function consultaMovil()
@@ -196,6 +198,8 @@ class VentaController extends Controller
             // Pago mixto: cuánto se recibió en efectivo y a qué cuenta (tipo Banco) entró el resto
             'monto_efectivo'     => 'nullable|numeric|min:0|max:99999999',
             'id_cuenta_mixto'    => ['nullable', Rule::exists('cuentas_bancarias', 'id')->where('activo', true)->where('tipo', CuentaBancaria::TIPO_BANCO)],
+            // Parte del total que el cliente paga con su saldo a favor
+            'monto_saldo_favor'  => 'nullable|numeric|min:0|max:99999999',
             'id_cliente'  => 'nullable|exists:clientes,id',
             'es_credito'  => 'boolean',
         ]);
@@ -254,6 +258,24 @@ class VentaController extends Controller
             $total = collect($request->items)->sum(fn($i) => $i['cantidad'] * $i['precio_venta']);
             $esCredito = $request->boolean('es_credito');
 
+            // Saldo a favor: cubre una parte (o todo) y el resto se paga con el medio elegido.
+            // El cliente se bloquea para que dos ventas simultáneas no gasten el mismo saldo.
+            $montoSaldoFavor = round((float) $request->monto_saldo_favor, 2);
+            $clienteSaldo = null;
+            if ($montoSaldoFavor > 0) {
+                if ($esCredito) {
+                    throw new \Exception('El saldo a favor no se usa en ventas a crédito: úsalo para abonar a las deudas del cliente.');
+                }
+                if (!$request->id_cliente) {
+                    throw new \Exception('Para usar saldo a favor selecciona el cliente.');
+                }
+                if ($montoSaldoFavor > $total) {
+                    throw new \Exception('El saldo a favor usado no puede superar el total de la venta.');
+                }
+                $clienteSaldo = Cliente::lockForUpdate()->findOrFail($request->id_cliente);
+            }
+            $aPagar = round($total - $montoSaldoFavor, 2);
+
             // Si se seleccionó una cuenta bancaria específica, el método de pago se deriva
             // de su tipo (no se confía en lo que mande el cliente) para que el Cuadre de Caja
             // siga sumando exactamente por los mismos valores de siempre (Efectivo/Transferencia).
@@ -276,6 +298,9 @@ class VentaController extends Controller
                 if ($cliente->limite_credito > 0 && ($deudaActual + $total) > $cliente->limite_credito) {
                     throw new \Exception("\"{$cliente->nombre}\" superaría su límite de crédito. Límite: $" . number_format($cliente->limite_credito, 0, ',', '.') . ", deuda actual: $" . number_format($deudaActual, 0, ',', '.') . ".");
                 }
+            } elseif ($aPagar <= 0) {
+                // Todo con saldo a favor: no entra dinero ni se toca ninguna cuenta
+                $metodoPago = Venta::METODO_SALDO_FAVOR;
             } elseif ($metodoPago === Venta::METODO_MIXTO) {
                 // Mixto = parte en efectivo (cuadra en el cajón) + resto por transferencia a una
                 // cuenta Banco (sube su saldo). Las dos partes deben ser mayores que cero; si no,
@@ -284,11 +309,11 @@ class VentaController extends Controller
                     throw new \Exception('En un pago mixto selecciona la cuenta que recibió la transferencia.');
                 }
                 $montoEfectivo = round((float) $request->monto_efectivo, 2);
-                if ($montoEfectivo <= 0 || $montoEfectivo >= $total) {
-                    throw new \Exception('En un pago mixto el efectivo debe ser mayor que $0 y menor que el total ($'
-                        . number_format($total, 0, ',', '.') . '). Si todo fue en un solo medio, elige ese medio.');
+                if ($montoEfectivo <= 0 || $montoEfectivo >= $aPagar) {
+                    throw new \Exception('En un pago mixto el efectivo debe ser mayor que $0 y menor que el total a pagar ($'
+                        . number_format($aPagar, 0, ',', '.') . '). Si todo fue en un solo medio, elige ese medio.');
                 }
-                $montoTransferencia = round($total - $montoEfectivo, 2);
+                $montoTransferencia = round($aPagar - $montoEfectivo, 2);
                 $cuentaBancaria = CuentaBancaria::lockForUpdate()->findOrFail($request->id_cuenta_mixto);
             } elseif ($request->filled('id_cuenta_bancaria')) {
                 $cuentaBancaria = CuentaBancaria::lockForUpdate()->findOrFail($request->id_cuenta_bancaria);
@@ -307,12 +332,18 @@ class VentaController extends Controller
                 'id_cuenta_bancaria' => $cuentaBancaria?->id,
                 'monto_efectivo'     => $montoEfectivo,
                 'monto_transferencia'=> $montoTransferencia,
+                'monto_saldo_favor'  => $clienteSaldo ? $montoSaldoFavor : null,
                 'fecha_vencimiento'=> $esCredito ? now()->addDays((int) $request->dias_credito) : null,
                 'saldo_pendiente'  => $esCredito ? $total : 0,
                 'estado_credito'   => $esCredito ? Venta::ESTADO_PARCIAL : Venta::ESTADO_PAGADO,
                 'total'            => $total,
                 'observaciones'    => $request->observaciones,
             ]);
+
+            if ($clienteSaldo) {
+                $clienteSaldo->moverSaldoFavor(-$montoSaldoFavor, MovimientoSaldoCliente::TIPO_COMPRA,
+                    ['id_venta' => $venta->id], "Pago de la venta #{$venta->id}");
+            }
 
             // Reflejar la venta en el saldo de la cuenta bancaria seleccionada (si no es Efectivo,
             // que sigue siendo controlado por el Cuadre de Caja).
@@ -434,7 +465,8 @@ class VentaController extends Controller
 
     public function show(Venta $venta)
     {
-        $venta->load(['usuario', 'cliente', 'historialVentas.lote.detalleProducto.producto', 'pagosCredito.usuario']);
+        $venta->load(['usuario', 'cliente', 'historialVentas.lote.detalleProducto.producto', 'pagosCredito.usuario',
+                      'devoluciones.usuario', 'devoluciones.detalles.historialVenta.lote.detalleProducto.producto', 'devoluciones.reembolso.cuentaBancaria']);
         $cuentas = CuentaBancaria::activas()->orderByRaw("tipo = 'Efectivo' desc")->orderBy('nombre')->get(['id', 'nombre', 'tipo']);
         return view('ventas.show', compact('venta', 'cuentas'));
     }
@@ -461,10 +493,12 @@ class VentaController extends Controller
             return back()->with('error', 'No se puede anular una venta con abonos registrados.');
         }
 
-        // El estado "liquidado" por préstamo individual nunca se asigna en el sistema actual
-        // (las liquidaciones se registran de forma agregada por local externo, no por préstamo).
-        // Por eso verificamos aquí si la deuda de esta venta ya quedó cubierta por pagos
-        // registrados al local externo correspondiente, en vez de confiar en ese estado.
+        if ($venta->devoluciones()->exists()) {
+            return back()->with('error', 'No se puede anular una venta con devoluciones registradas. Si el cliente devuelve lo demás, regístralo como otra devolución.');
+        }
+
+        // Si la deuda de esta venta con el local externo ya quedó cubierta por pagos
+        // registrados, anularla dejaría al local con un saldo a nuestro favor sin explicación.
         $prestamosDeLaVenta = PrestamoExterno::where('id_venta', $venta->id)
             ->where('estado', PrestamoExterno::ESTADO_PENDIENTE)
             ->whereNotNull('costo_acordado')
@@ -473,18 +507,7 @@ class VentaController extends Controller
             ->groupBy('id_local_externo');
 
         foreach ($prestamosDeLaVenta as $idLocal => $prestamosLocal) {
-            $costoDeEstaVenta = $prestamosLocal->sum('total_deuda');
-
-            $totalPendienteLocal = PrestamoExterno::where('id_local_externo', $idLocal)
-                ->where('estado', PrestamoExterno::ESTADO_PENDIENTE)
-                ->whereNotNull('costo_acordado')
-                ->get()
-                ->sum('total_deuda');
-
-            $totalLiquidadoLocal = LiquidacionPrestamo::where('id_local_externo', $idLocal)->sum('monto');
-            $pendienteSinEstaVenta = $totalPendienteLocal - $costoDeEstaVenta;
-
-            if ($totalLiquidadoLocal > $pendienteSinEstaVenta) {
+            if (PrestamoExterno::deudaYaCubierta($idLocal, $prestamosLocal->sum('total_deuda'))) {
                 $nombreLocal = $prestamosLocal->first()->localExterno?->nombre_local ?? 'local externo';
                 return back()->with('error', "No se puede anular: la deuda del préstamo con \"{$nombreLocal}\" de esta venta ya fue cubierta por pagos registrados. Contacta al administrador para un ajuste manual.");
             }
@@ -542,6 +565,16 @@ class VentaController extends Controller
             }
             $venta->update($updateData);
 
+            // Si se pagó (en parte) con saldo a favor, el cliente lo recupera
+            if ($venta->monto_saldo_favor > 0 && $venta->id_cliente) {
+                Cliente::lockForUpdate()->findOrFail($venta->id_cliente)->moverSaldoFavor(
+                    (float) $venta->monto_saldo_favor,
+                    MovimientoSaldoCliente::TIPO_ANULACION,
+                    ['id_venta' => $venta->id],
+                    "Anulación venta #{$venta->id}: se devuelve el saldo usado"
+                );
+            }
+
             // Revertir el dinero de la cuenta bancaria para que su saldo siga reflejando la realidad.
             // Efectivo no se toca aquí: su saldo lo maneja el Cuadre de Caja, no este ledger.
             if ($venta->id_cuenta_bancaria) {
@@ -560,5 +593,11 @@ class VentaController extends Controller
 
         return redirect()->route('ventas.index')
                          ->with('success', 'Venta anulada y stock restaurado. El registro se conserva para trazabilidad.');
+    }
+
+    /** Saldo a favor de los clientes que tienen, por id, para que el POS ofrezca usarlo. */
+    private function saldosFavorClientes(): \Illuminate\Support\Collection
+    {
+        return Cliente::activos()->where('saldo_favor', '>', 0)->pluck('saldo_favor', 'id')->map(fn($s) => (float) $s);
     }
 }

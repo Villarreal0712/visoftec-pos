@@ -123,6 +123,9 @@
                 @if($gastos > $gastosEfectivo)
                 <div class="summary-row" style="font-size:10px;color:#6b7280;"><span>  (pagados desde cuenta bancaria: ${{ number_format($gastos - $gastosEfectivo, 0, ',', '.') }}, no afectan la caja)</span><span></span></div>
                 @endif
+                @if($reembolsos > 0)
+                <div class="summary-row"><span>− Reembolsos a clientes:</span><span>-${{ number_format($reembolsos, 0, ',', '.') }}</span></div>
+                @endif
                 @if($liquidacionesExternas > 0)
                 <div class="summary-row"><span>− Pagos a externos:</span><span>-${{ number_format($liquidacionesExternas, 0, ',', '.') }}</span></div>
                 @endif

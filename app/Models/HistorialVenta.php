@@ -16,12 +16,14 @@ class HistorialVenta extends Model
         'id_venta',
         'id_lote',
         'cantidad',
+        'cantidad_devuelta',
         'precio_venta',
         'costo_unitario',
     ];
 
     protected $casts = [
         'cantidad' => 'integer',
+        'cantidad_devuelta' => 'integer',
         'precio_venta' => 'decimal:2',
         'costo_unitario' => 'decimal:2',
     ];
@@ -44,11 +46,17 @@ class HistorialVenta extends Model
         return $this->cantidad * $this->precio_venta;
     }
 
+    /** Unidades que el cliente se quedó (vendidas menos devueltas). */
+    public function getCantidadNetaAttribute(): int
+    {
+        return $this->cantidad - $this->cantidad_devuelta;
+    }
+
     /**
-     * Calcula la ganancia del ítem
+     * Calcula la ganancia del ítem (sin las unidades devueltas)
      */
     public function getGananciaAttribute(): float
     {
-        return ($this->precio_venta - $this->costo_unitario) * $this->cantidad;
+        return ($this->precio_venta - $this->costo_unitario) * $this->cantidad_neta;
     }
 }

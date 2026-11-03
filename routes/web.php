@@ -7,6 +7,7 @@ use App\Http\Controllers\ClienteController;
 use App\Http\Controllers\RolController;
 use App\Http\Controllers\CuadreCajaController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DevolucionController;
 use App\Http\Controllers\GastoController;
 use App\Http\Controllers\InventarioController;
 use App\Http\Controllers\LocalExternoController;
@@ -112,6 +113,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/clientes/{cliente}/ticket-abono-mixto', [ClienteController::class, 'ticketAbonoMixto'])->name('clientes.ticket-mixto');
         Route::get('/abonos/{pago}/ticket', [ClienteController::class, 'ticketAbono'])->name('abonos.ticket');
         Route::delete('/abonos/{pago}', [ClienteController::class, 'destroyAbono'])->name('abonos.destroy');
+        Route::post('/clientes/{cliente}/reembolsar-saldo', [ClienteController::class, 'reembolsarSaldo'])->name('clientes.reembolsar-saldo');
     });
 
     // === VENTAS ===
@@ -137,7 +139,11 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/ventas/{venta}', [VentaController::class, 'show'])->name('ventas.show');
         Route::get('/ventas/{venta}/ticket', [VentaController::class, 'ticket'])->name('ventas.ticket');
     });
-    Route::middleware(['permission:ventas.anular'])->delete('/ventas/{venta}', [VentaController::class, 'destroy'])->name('ventas.destroy');
+    Route::middleware(['permission:ventas.anular'])->group(function () {
+        Route::delete('/ventas/{venta}', [VentaController::class, 'destroy'])->name('ventas.destroy');
+        // Devolución parcial: mismo nivel de confianza que anular
+        Route::post('/ventas/{venta}/devolucion', [DevolucionController::class, 'store'])->name('ventas.devolucion');
+    });
 
     // === CUENTAS CON LOCALES EXTERNOS (PRÉSTAMOS) ===
     Route::middleware(['permission:prestamos.ver'])->group(function () {

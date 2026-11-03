@@ -40,14 +40,14 @@ class ReporteController extends Controller
 
         $ventas = $query->latest()->get();
 
-        $totalVentas = $ventas->sum('total');
+        $totalVentas = $ventas->sum(fn($v) => $v->totalNeto());
         $totalGanancia = $ventas->sum(fn($v) => $v->historialVentas->sum('ganancia'));
 
         // Agrupar por método de pago
         $porMetodoPago = $ventas->groupBy('metodo_pago')
                                 ->map(fn($grupo) => [
                                     'cantidad' => $grupo->count(),
-                                    'total' => $grupo->sum('total'),
+                                    'total' => $grupo->sum(fn($v) => $v->totalNeto()),
                                 ]);
 
         return view('reportes.ventas', compact(
@@ -105,14 +105,15 @@ class ReporteController extends Controller
             ->selectRaw('
                 p.nombre as producto,
                 dp.talla,
-                SUM(hv.cantidad) as cantidad_vendida,
+                SUM(hv.cantidad - hv.cantidad_devuelta) as cantidad_vendida,
                 AVG(hv.precio_venta) as precio_promedio,
                 AVG(hv.costo_unitario) as costo_promedio,
-                SUM(hv.cantidad * hv.precio_venta) as total_ingresos,
-                SUM(hv.cantidad * hv.costo_unitario) as total_costos,
-                SUM(hv.cantidad * (hv.precio_venta - hv.costo_unitario)) as ganancia_total
+                SUM((hv.cantidad - hv.cantidad_devuelta) * hv.precio_venta) as total_ingresos,
+                SUM((hv.cantidad - hv.cantidad_devuelta) * hv.costo_unitario) as total_costos,
+                SUM((hv.cantidad - hv.cantidad_devuelta) * (hv.precio_venta - hv.costo_unitario)) as ganancia_total
             ')
             ->groupBy('p.id', 'p.nombre', 'dp.id', 'dp.talla')
+            ->havingRaw('SUM(hv.cantidad - hv.cantidad_devuelta) > 0')   // los devueltos del todo no cuentan
             ->orderByDesc('ganancia_total')
             ->get();
 
@@ -182,7 +183,7 @@ class ReporteController extends Controller
 
         $ventas = $query->latest()->get();
 
-        $totalVentas = $ventas->sum('total');
+        $totalVentas = $ventas->sum(fn($v) => $v->totalNeto());
 
         $pdf = Pdf::loadView('reportes.pdf.ventas', compact('ventas', 'totalVentas', 'fechaInicio', 'fechaFin'))
                   ->setPaper('a4', 'landscape');

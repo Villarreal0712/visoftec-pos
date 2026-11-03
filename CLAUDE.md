@@ -85,6 +85,13 @@ En `agregarProducto()` y `buscarProducto()` de Alpine.js: si `stock === 0`, bloq
 - Mixtas anteriores al cambio no tienen reparto (`monto_transferencia` NULL): se siguen contando completas como transferencia.
 - Cuadre: `totalSistema` no cambió; la "Referencia del sistema" reparte cajón/transferencias con `mixtoEfectivo`, `pagosCreditoEfectivo` y `gastosEfectivo`.
 
+### Devoluciones y saldo a favor — desde 2026-10-30
+- **Devolución parcial** (`DevolucionController::store`, botón "Devolver ítems" en el detalle de la venta, permiso `ventas.anular`): los ítems propios vuelven a su lote/bodega; los prestados vuelven al local externo (baja `prestamos_externos.cantidad`, o queda `anulado` si se devuelve todo). Bloqueada si la deuda con el local ya fue pagada (`PrestamoExterno::deudaYaCubierta`, misma regla que anular).
+- **`ventas.total` no cambia** (el dinero sí entró ese día): se suma a `ventas.total_devuelto` y `historial_ventas.cantidad_devuelta`. Usar `$venta->totalNeto()` y `cantidad_neta`/`ganancia` (ya netos) en reportes. `actualizarEstadoCredito()` usa el total neto.
+- Lo devuelto **primero descuenta la deuda** de esa venta; el excedente queda como **saldo a favor** (requiere cliente) o se **reembolsa** (`reembolsos_cliente`, efectivo o cuenta). Una venta con devoluciones ya no se puede anular.
+- **Saldo a favor**: `clientes.saldo_favor` (fuera de `$fillable`) solo cambia con `Cliente::moverSaldoFavor()` (cliente bloqueado), que deja el historial en `movimientos_saldo_cliente`. Se usa en el POS (`ventas.monto_saldo_favor`; si cubre todo, `metodo_pago = 'Saldo a favor'`; no aplica a crédito), para abonar (`pagos_credito.metodo = 'Saldo a favor'`, `usar_saldo_favor=1`) o se reembolsa desde el perfil del cliente. Anular la venta o el abono devuelve el saldo.
+- **Cuadre**: las ventas suman `total - monto_saldo_favor`; los abonos con saldo no cuentan (`PagoCredito::conDinero()`); los reembolsos en efectivo restan (`reembolsos`, guardado al cerrar). `montoEnCuenta()` ya descuenta el saldo usado.
+
 ### Salida de inventario (`/inventario/salida` y `/pos-movil/salida`)
 Tipo carrito: varios productos, se elige bodega, motivo obligatorio. Descuenta FIFO solo de esa bodega con `lockForUpdate()`. Tipos: Salida, Merma, Ajuste, Transferencia (a local externo).
 
