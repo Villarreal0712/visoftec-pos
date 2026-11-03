@@ -209,6 +209,10 @@ Reglas generales:
 - **Migraciones sin shell:** subir un `routes/web.php` temporal con una ruta secreta `/tmp-artisan-<clave-aleatoria>/{status|pretend|migrate}` que llama `Artisan::call(...)`; el **usuario** la abre en su navegador (el hosting tiene anti-bot "One moment, please..." que bloquea curl); luego volver a subir el `web.php` original y verificar que la ruta ya no esté. Alternativa: SQL en phpMyAdmin + `INSERT` en la tabla `migrations`.
 - HTTPS activo → la cámara del POS móvil funciona sin configuración extra.
 
+### Último despliegue
+- **2026-11-03**: santorini y jcfa en el commit `8fdaace` (devoluciones/saldo a favor). Ese despliegue incluyó también `fd334b3` (reporte de movimientos) y `0383fd4` (pago mixto), que nunca se habían subido: los servidores estaban en `129a118`. **Antes de desplegar, comparar los archivos del servidor contra el commit base** (md5 en santorini; `sftp get` en jcfa).
+- Respaldos de ese despliegue: santorini `backups/pre-devoluciones-20261103-1729-{archivos.tgz,bd.sql.gz}`; jcfa `storage/app/respaldo-pre-devoluciones-20261103-123435.sql.gz` (la ruta temporal hizo el respaldo de la BD con PDO antes de migrar, ya que no hay `mysqldump` sin shell).
+
 ### Pendientes
 - Cron de `schedule:run` en santorini (hPanel) para la tarea diaria que marca créditos en mora (`routes/console.php`).
 - jcfa: borrar del servidor `README-DESPLIEGUE.txt`, `BASE_DE_DATOS.sql` y `app.zip` (sobrantes de la instalación).
