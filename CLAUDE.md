@@ -86,7 +86,7 @@ En `agregarProducto()` y `buscarProducto()` de Alpine.js: si `stock === 0`, bloq
 - Cuadre: `totalSistema` no cambió; la "Referencia del sistema" reparte cajón/transferencias con `mixtoEfectivo`, `pagosCreditoEfectivo` y `gastosEfectivo`.
 
 ### Devoluciones y saldo a favor — desde 2026-10-30
-- **Devolución parcial** (`DevolucionController::store`, botón "Devolver ítems" en el detalle de la venta, permiso `ventas.anular`): los ítems propios vuelven a su lote/bodega; los prestados vuelven al local externo (baja `prestamos_externos.cantidad`, o queda `anulado` si se devuelve todo). Bloqueada si la deuda con el local ya fue pagada (`PrestamoExterno::deudaYaCubierta`, misma regla que anular).
+- **Devolución parcial** (`DevolucionController::store`, botón "Devolver ítems" en el detalle de la venta, permiso `ventas.anular`): los ítems propios vuelven a su lote/bodega; los prestados vuelven al local externo (baja `prestamos_externos.cantidad`, o queda `anulado` si se devuelve todo). Bloqueada si la deuda con el local ya fue pagada (`PrestamoExterno::deudaYaCubierta`, misma regla que anular) y también si el préstamo está en el estado heredado `liquidado` (el código actual ya no lo asigna; sin el bloqueo la unidad no volvía ni al local ni al inventario). Ambos casos piden un ajuste manual, que hoy no tiene pantalla.
 - **`ventas.total` no cambia** (el dinero sí entró ese día): se suma a `ventas.total_devuelto` y `historial_ventas.cantidad_devuelta`. Usar `$venta->totalNeto()` y `cantidad_neta`/`ganancia` (ya netos) en reportes. `actualizarEstadoCredito()` usa el total neto.
 - Lo devuelto **primero descuenta la deuda** de esa venta; el excedente queda como **saldo a favor** (requiere cliente) o se **reembolsa** (`reembolsos_cliente`, efectivo o cuenta). Una venta con devoluciones ya no se puede anular.
 - **Saldo a favor**: `clientes.saldo_favor` (fuera de `$fillable`) solo cambia con `Cliente::moverSaldoFavor()` (cliente bloqueado), que deja el historial en `movimientos_saldo_cliente`. Se usa en el POS (`ventas.monto_saldo_favor`; si cubre todo, `metodo_pago = 'Saldo a favor'`; no aplica a crédito), para abonar (`pagos_credito.metodo = 'Saldo a favor'`, `usar_saldo_favor=1`) o se reembolsa desde el perfil del cliente. Anular la venta o el abono devuelve el saldo.
@@ -214,5 +214,14 @@ Reglas generales:
 - Respaldos de ese despliegue: santorini `backups/pre-devoluciones-20261103-1729-{archivos.tgz,bd.sql.gz}`; jcfa `storage/app/respaldo-pre-devoluciones-20261103-123435.sql.gz` (la ruta temporal hizo el respaldo de la BD con PDO antes de migrar, ya que no hay `mysqldump` sin shell).
 
 ### Pendientes
+- **Desplegar** el bloqueo de devoluciones de préstamos `liquidado` (`DevolucionController`, commit posterior a `8fdaace`). Solo código, sin migración; riesgo bajo, puede ir en el próximo despliegue.
 - Cron de `schedule:run` en santorini (hPanel) para la tarea diaria que marca créditos en mora (`routes/console.php`).
 - jcfa: borrar del servidor `README-DESPLIEGUE.txt`, `BASE_DE_DATOS.sql` y `app.zip` (sobrantes de la instalación).
+
+### Ideas evaluadas (sin programar)
+- **Saldo a favor manual**: decidido no hacerlo por ahora. Si se retoma: separar *anticipo* (entra dinero a caja/cuenta) de *ajuste* (sin dinero, solo administrador, motivo obligatorio, sin borrar ni editar, corrección con ajuste contrario).
+- **Sugerir en la devolución la cuenta por donde se pagó la venta** para el reembolso (hoy el usuario la elige y, si no elige, se toma como efectivo).
+- **Agente de IA** dentro del POS: piloto propuesto de chat solo para administradores con herramientas de solo consulta (ventas, stock, cartera, mora) que respeten rol y sucursal; acciones de dinero siempre con confirmación humana. n8n solo para alertas o WhatsApp, no para el chat.
+
+## Trabajo de grado (modalidad emprendimiento) — fuera de este repositorio
+El informe final del autor usa este sistema solo como **valor agregado y evidencia** de un modelo de negocio: servicio de gestión administrativa por suscripción para comerciantes de calzado y perfumería del centro de Medellín. Los archivos están en `Downloads` del equipo de trabajo (no en git): `Informe_final_emprendimiento_v2.docx`, `Modelo_financiero_servicio_gestion.xlsx`, `GPD-FR-113_LeanCanvas_diligenciado.docx` y `GPD-FR-112_ModeloNegocio_Validaciones_diligenciado.docx`. Lo resaltado en amarillo queda pendiente de las entrevistas (10 clientes potenciales), la prueba con 5 usuarios y las capturas de pantalla. Precio vigente: $200.000/mes por local (25 % de descuento pagando 6 meses). Hosting: Hosting Latinoamérica, plan actual de $90.000/año; planes E1–E4 ($900.000–$2.500.000/año, 30–60 bases de datos) para crecer.

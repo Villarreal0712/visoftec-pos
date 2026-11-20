@@ -73,9 +73,13 @@ class DevolucionController extends Controller
                     $total += $cantidad * (float) $linea->precio_venta;
 
                     if ($linea->lote->tipo_origen === 'Directo') {
-                        $prestamo = PrestamoExterno::where('id_historial_venta', $linea->id)
-                            ->where('estado', PrestamoExterno::ESTADO_PENDIENTE)->first();
-                        if ($prestamo && $prestamo->costo_acordado !== null) {
+                        $prestamo = PrestamoExterno::where('id_historial_venta', $linea->id)->first();
+                        // Un préstamo liquidado (estado heredado) ya se le pagó al local: la unidad no
+                        // volvería ni al local ni al inventario, así que no se registra en silencio.
+                        if ($prestamo && $prestamo->estado === PrestamoExterno::ESTADO_LIQUIDADO) {
+                            throw new \Exception('No se puede devolver: el préstamo de ese producto ya está liquidado con el local externo. Contacta al administrador para un ajuste manual.');
+                        }
+                        if ($prestamo && $prestamo->estado === PrestamoExterno::ESTADO_PENDIENTE && $prestamo->costo_acordado !== null) {
                             $deudaPrestamoPorLocal[$prestamo->id_local_externo] =
                                 ($deudaPrestamoPorLocal[$prestamo->id_local_externo] ?? 0) + $cantidad * (float) $prestamo->costo_acordado;
                         }

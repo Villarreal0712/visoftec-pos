@@ -277,6 +277,13 @@ class DevolucionSaldoFavorTest extends TestCase
         $this->devolver($venta, 1)->assertSessionHas('error');
 
         LiquidacionPrestamo::query()->delete();
+
+        // Un préstamo en estado heredado 'liquidado' no se devuelve en silencio
+        $prestamo->update(['estado' => PrestamoExterno::ESTADO_LIQUIDADO]);
+        $this->devolver($venta, 1)->assertSessionHas('error');
+        $this->assertEquals(1, $venta->historialVentas()->first()->cantidad_devuelta);
+        $prestamo->update(['estado' => PrestamoExterno::ESTADO_PENDIENTE]);
+
         $this->devolver($venta, 1)->assertSessionHas('success');
         $this->assertSame(PrestamoExterno::ESTADO_ANULADO, $prestamo->fresh()->estado);
     }
